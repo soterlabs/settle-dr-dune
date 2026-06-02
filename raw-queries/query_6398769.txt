@@ -1,0 +1,42 @@
+with vault_holdings as (
+    select
+        blockchain,
+        vault_symbol,
+        dt,
+        sum(time_weighted_avg_balance) as vault_idle_holdings
+    from dune.sparkdotfi.result_spark_savings_v_2_vaults_time_weighted_average_holdings
+    group by blockchain, vault_symbol, dt
+),
+
+vault_totals as (
+    select
+        blockchain,
+        symbol as vault_symbol,
+        dt,
+        sum(time_weighted_avg_balance) as vault_total_supply
+    from dune.sparkdotfi.result_spark_sp_usdc_sp_usdt_sp_eth_time_weighted_average_balance
+    where symbol != 'spETH'
+    group by blockchain, symbol, dt
+)
+
+select
+    vt.blockchain,
+    vt.vault_symbol,
+    vt.dt,
+    vt.vault_total_supply,
+    coalesce(vh.vault_idle_holdings, 0) as vault_idle_holdings,
+    vt.vault_total_supply - coalesce(vh.vault_idle_holdings, 0) as vault_deployed,
+    case
+        when vt.vault_total_supply > 0 then
+            greatest(
+                (vt.vault_total_supply - coalesce(vh.vault_idle_holdings, 0)) / vt.vault_total_supply,
+                0
+            )
+        else 0
+    end as deployment_ratio
+from vault_totals vt
+left join vault_holdings vh
+    on vt.blockchain = vh.blockchain
+    and vt.vault_symbol = vh.vault_symbol
+    and vt.dt = vh.dt
+order by dt, blockchain, vault_symbol

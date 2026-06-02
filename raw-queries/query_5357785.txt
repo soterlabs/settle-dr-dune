@@ -1,0 +1,135 @@
+with token_targets (
+    blockchain,
+    token_symbol,
+    token_addr,
+    start_date
+) as (
+    values
+        ('ethereum', 'spUSDC', 0x28B3a8fb53B741A8Fd78c0fb9A6B2393d896a43d, date '2025-10-01'),
+        ('ethereum', 'spUSDT', 0xe2e7a17dFf93280dec073C995595155283e3C372, date '2025-10-01'),
+        ('ethereum', 'spETH', 0xfE6eb3b609a7C8352A241f7F3A21CEA4e9209B8f, date '2025-10-01'),
+        ('ethereum', 'spPYUSD', 0x80128DbB9f07b93DDE62A6daeadb69ED14a7D354, date '2025-12-01'),
+        ('avalanche_c', 'spUSDC', 0x28B3a8fb53B741A8Fd78c0fb9A6B2393d896a43d, date '2025-10-08')
+),
+
+date_constants AS (
+    SELECT
+        DATE '2025-10-01' AS start_date,
+        CURRENT_DATE AS end_date
+),
+
+spark_vault_realtime_rates_raw AS (
+    SELECT 
+        'ethereum' as blockchain,
+        evt_block_time,
+        evt_index,
+        contract_address,
+        cast(assets as double) / cast(shares as double) as conversion_rate
+    FROM (
+        SELECT evt_block_time, evt_index, contract_address, assets, shares 
+        FROM spark_protocol_ethereum.sparkvault_evt_deposit
+        CROSS JOIN date_constants dc
+        WHERE shares > 0
+        AND evt_block_time >= dc.start_date
+        AND evt_block_time <= dc.end_date + INTERVAL '1' DAY
+        
+        UNION ALL
+        
+        SELECT evt_block_time, evt_index, contract_address, assets, shares 
+        FROM spark_protocol_ethereum.sparkvault_evt_withdraw
+        CROSS JOIN date_constants dc
+        WHERE shares > 0
+        AND evt_block_time >= dc.start_date
+        AND evt_block_time <= dc.end_date + INTERVAL '1' DAY
+    )
+    
+    UNION ALL
+    
+    SELECT 
+        'avalanche_c' as blockchain,
+        evt_block_time,
+        evt_index,
+        contract_address,
+        cast(assets as double) / cast(shares as double) as conversion_rate
+    FROM (
+        SELECT evt_block_time, evt_index, contract_address, assets, shares 
+        FROM spark_protocol_avalanche_c.sparkvault_evt_deposit
+        CROSS JOIN date_constants dc
+        WHERE shares > 0
+        AND evt_block_time >= dc.start_date
+        AND evt_block_time <= dc.end_date + INTERVAL '1' DAY
+        
+        UNION ALL
+        
+        SELECT evt_block_time, evt_index, contract_address, assets, shares 
+        FROM spark_protocol_avalanche_c.sparkvault_evt_withdraw
+        CROSS JOIN date_constants dc
+        WHERE shares > 0
+        AND evt_block_time >= dc.start_date
+        AND evt_block_time <= dc.end_date + INTERVAL '1' DAY
+    )
+),
+
+daily_last_rates AS (
+    SELECT 
+        blockchain,
+        DATE(evt_block_time) as dt,
+        contract_address,
+        MAX_BY(conversion_rate, evt_block_time) as conversion_rate
+    FROM spark_vault_realtime_rates_raw
+    GROUP BY blockchain, DATE(evt_block_time), contract_address
+),
+
+date_series AS (
+    SELECT dt
+    FROM UNNEST(
+        SEQUENCE(
+            (SELECT start_date FROM date_constants),
+            (SELECT end_date FROM date_constants),
+            INTERVAL '1' DAY
+        )
+    ) AS t(dt)
+),
+
+complete_daily_rates AS (
+    SELECT 
+        ds.dt,
+        tt.blockchain,
+        tt.token_addr as contract_address,
+        tt.token_symbol,
+        COALESCE(
+            dlr.conversion_rate,
+            LAST_VALUE(dlr.conversion_rate) IGNORE NULLS
+            OVER (PARTITION BY tt.blockchain, tt.token_addr ORDER BY ds.dt ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+        ) as conversion_rate
+    FROM date_series ds
+    CROSS JOIN token_targets tt
+    LEFT JOIN daily_last_rates dlr ON ds.dt = dlr.dt 
+        AND tt.blockchain = dlr.blockchain 
+        AND tt.token_addr = dlr.contract_address
+    WHERE ds.dt >= tt.start_date
+)
+
+SELECT 
+    cdr.dt,
+    cdr.blockchain,
+    cdr.contract_address,
+    cdr.token_symbol,
+    coalesce(cdr.conversion_rate, 1) as conversion_rate,
+    coalesce(p.price, pl.price) as eth_price,
+    CASE 
+        WHEN cdr.token_symbol = 'spETH' THEN coalesce(cdr.conversion_rate, 1) * coalesce(p.price, pl.price, 1)
+        ELSE coalesce(cdr.conversion_rate, 1)
+    END as usd_value
+FROM complete_daily_rates cdr
+LEFT JOIN prices.day p 
+    ON DATE(p.timestamp) = cdr.dt
+    AND p.blockchain = 'ethereum'
+    AND p.contract_address = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
+    AND cdr.token_symbol = 'spETH'
+LEFT JOIN prices.latest pl 
+    ON pl.blockchain = 'ethereum'
+    AND pl.contract_address = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
+    AND cdr.token_symbol = 'spETH'
+    AND p.price is null
+ORDER BY cdr.blockchain, cdr.contract_address, cdr.dt DESC

@@ -1,0 +1,166 @@
+with raw as (
+    select
+        dt,
+        blockchain,
+        contract_address,
+        token,
+        ref_code,
+        amount,
+        amount as amount_deployed
+    from query_5310067
+    union all
+    select
+        dt,
+        blockchain,
+        contract_address,
+        token,
+        ref_code,
+        amount,
+        amount as amount_deployed
+    from dune.sparkdotfi.result_spark_staked_usds_balances_by_referrals
+    union all
+    select
+        dt,
+        blockchain,
+        contract_address,
+        token,
+        ref_code,
+        amount,
+        amount as amount_deployed
+    from query_5358290
+    union all
+    select
+        dt,
+        blockchain,
+        contract_address,
+        token,
+        ref_code,
+        amount,
+        amount_deployed
+    from query_5358295
+),
+user_level as (
+    select
+        b.dt,
+        b.blockchain,
+        b.token,
+        b.ref_code,
+        case
+            when b.token in (
+                'sUSDC',
+                'spUSDC',
+                'spUSDT',
+                'spPYUSD'
+            )
+                then 'Spark referrals'
+            when b.token = 'spETH'
+                then 'non-Spark referrals'
+            when b.ref_code between 100
+            and 999
+                then 'Spark referrals'
+            else 'non-Spark referrals'
+        end as referral_type,
+        p.reward_code,
+        p.reward_per,
+        sum(b.amount) as amount,
+        sum(
+            case
+                when token like 'sp%'
+                    then b.amount_deployed
+                else b.amount
+            end / 365 * p.reward_per
+        ) as tw_reward,
+        avg(
+            sum(
+                case
+                    when token like 'sp%'
+                        then b.amount_deployed
+                    else b.amount
+                end
+            )
+        ) over (
+            partition by b.blockchain,
+            b.token,
+            b.ref_code
+            order by b.dt rows between 6 preceding
+                and current row
+        ) as amount_7d_avg
+    from raw b
+    cross join query_5353955 p
+    where
+        (
+            (
+                b.token = 'stUSDS'
+                and p.reward_code = 'XR-stUSDS'
+            )
+            or (
+                b.token in ('sUSDS', 'USDS-SKY', 'USDS-SPK')
+                and p.reward_code = 'XR'
+            )
+            or (
+                b.token in ('sUSDC', 'spUSDC', 'spUSDT', 'spPYUSD', 'spETH')
+                and p.reward_code = 'XR*'
+            )
+        )
+        and b.dt between p.start_dt
+        and p.end_dt
+    group by 1, 2, 3, 4, 5, 6, 7
+    union all
+    select
+        *
+    from query_5531933
+),
+user_level_final as (
+    select
+        dt,
+        blockchain,
+        case
+            when token in ('USDS-SPK', 'USDS-SKY')
+                then 'stakedUSDS'
+            when token = 'USDS'
+                then 'USDS - Treasury'
+            else token
+        end as token_symbol,
+        case
+            when token = 'USDS'
+                then 'USDS - Treasury'
+            else token
+        end as token,
+        ref_code,
+        referral_type,
+        amount,
+        amount_7d_avg,
+        reward_code,
+        reward_per,
+        tw_reward
+    from user_level
+)
+select
+    b.*,
+    case
+        when b.token_symbol in ('sUSDS', 'sUSDC')
+            then p.susds_conversion_rate
+        when b.token_symbol = 'stUSDS'
+            then s.stusds_conversion_rate
+        when b.token_symbol in ('spUSDC', 'spUSDT', 'spETH', 'spPYUSD')
+            then sp.usd_value
+        else 1
+    end as price_usd,
+    b.tw_reward * case
+        when b.token_symbol in ('sUSDS', 'sUSDC')
+            then p.susds_conversion_rate
+        when b.token_symbol = 'stUSDS'
+            then s.stusds_conversion_rate
+        when b.token_symbol in ('spUSDC', 'spUSDT', 'spETH', 'spPYUSD')
+            then sp.usd_value
+        else 1
+    end as tw_reward_usd
+from user_level_final b
+left join query_5752873 p
+    on b.dt = p.dt
+left join query_5449435 s
+    on b.dt = s.dt
+left join query_5357785 sp
+    on b.dt = sp.dt
+    and b.token_symbol = sp.token_symbol
+    and b.blockchain = sp.blockchain

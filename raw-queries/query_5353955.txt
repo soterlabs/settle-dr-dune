@@ -1,0 +1,111 @@
+WITH
+    ssr AS (
+        SELECT
+            date(call_block_time) AS dt,
+            power((output_0 / 1e27), 365 * 24 * 60 * 60) - 1 AS ssr_rate
+        FROM (
+            SELECT
+                call_block_time,
+                output_0,
+                lag(output_0) OVER (ORDER BY call_block_time) AS lag_output_0
+            FROM sky_ethereum.sUSDS_call_ssr
+            WHERE call_success
+        )
+        WHERE output_0 <> coalesce(lag_output_0, cast(0 AS uint256))
+    ),
+    ssr_periods AS (
+        SELECT
+            ssr_rate,
+            dt AS start_date,
+            CASE 
+                WHEN lead(dt) OVER (ORDER BY dt) IS NULL THEN date '2030-12-31' 
+                ELSE lead(dt) OVER (ORDER BY dt) - interval '1' day
+            END AS end_date
+        FROM ssr
+        WHERE dt >= date '2024-09-25'
+    ),
+    dynamic_rewards AS (
+        SELECT 
+            t.reward_code,
+            t.reward_description,
+            GREATEST(s.start_date, r.start_dt) AS start_dt,
+            LEAST(s.end_date, r.end_dt) AS end_dt,
+            CASE 
+                WHEN t.reward_code = 'SR' THEN 365.0 * (exp(ln(cast(1.0 + s.ssr_rate as double)) / 365.0) - 1.0)
+                WHEN t.reward_code = 'AR' AND r.is_2025_special THEN 365.0 * (exp(ln(cast(1.0 + (1 + s.ssr_rate) * (1 + 0.006) - 1 as double)) / 365.0) - 1.0)
+                WHEN t.reward_code = 'AR' AND NOT r.is_2025_special THEN 365.0 * (exp(ln(cast(1.0 + (1 + s.ssr_rate) * (1 + 0.002) - 1 as double)) / 365.0) - 1.0)
+                WHEN t.reward_code = 'AR*' AND r.is_2025_special THEN 365.0 * (exp(ln(cast(1.0 + (1 + s.ssr_rate) * (1 + 0.002) - 1 as double)) / 365.0) - 1.0)
+                WHEN t.reward_code = 'BR' THEN 365.0 * (exp(ln(cast(1.0 + (1 + s.ssr_rate) * (1 + 0.003) - 1 as double)) / 365.0) - 1.0)
+            END AS reward_per
+        FROM ssr_periods s
+        CROSS JOIN (
+            VALUES
+                ('SR', 'Savings Rate'),
+                ('AR', 'Agent Rate'),
+                ('AR*', 'Agent Rate Alternative'),
+                ('BR', 'Base Rate')
+        ) AS t(reward_code, reward_description)
+        CROSS JOIN (
+            VALUES
+                (date '2024-01-01', date '2025-12-31', true), 
+                (date '2026-01-01', date '2030-12-31', false)  
+        ) AS r(start_dt, end_dt, is_2025_special)
+        WHERE s.start_date <= r.end_dt 
+          AND s.end_date >= r.start_dt
+    ),
+    static_rewards AS (
+        SELECT 
+            reward_code, 
+            reward_description, 
+            start_dt, 
+            end_dt,
+            CASE 
+                WHEN reward_per_apy = 0 THEN 0.0
+                ELSE 365.0 * (exp(ln(cast(1.0 + reward_per_apy as double)) / 365.0) - 1.0)
+            END AS reward_per
+        FROM (
+            VALUES
+                ('XR', 'Accessibility Rewards (sUSDS/USDS-SKY/USDS-SPK)', 0.006, date '2024-01-01', date '2025-12-31'),
+                ('XR', 'Accessibility Rewards (sUSDS/USDS-SKY/USDS-SPK)', 0.005, date '2026-01-01', date '2030-12-31'),
+                ('XR-stUSDS', 'Accessibility Rewards (stUSDS)', 0.006, date '2024-01-01', date '2025-12-31'),
+                ('XR-stUSDS', 'Accessibility Rewards (stUSDS)', 0.001, date '2026-01-01', date '2030-12-31'),
+                ('XR*', 'Accessibility Rewards Alternative (sUSDC/spUSDC/spUSDT/spPYUSD)', 0.006, date '2024-01-01', date '2025-12-31'),
+                ('XR*', 'Accessibility Rewards Alternative (sUSDC/spUSDC/spUSDT/spPYUSD)', 0.002, date '2026-01-01', date '2030-12-31'),
+                ('NA', 'Not Applicable', 0, date '2024-01-01', date '2030-12-31')
+        ) AS t(reward_code, reward_description, reward_per_apy, start_dt, end_dt)
+    ),
+    subsidized_rewards AS (
+        SELECT 
+            'BR*' as reward_code,
+            'Sky Subsidized Base Rate (First 1B)' as reward_description,
+            start_dt,
+            end_dt,
+            subsidized_borrowing_rate_apr as reward_per
+        FROM query_6484247
+    )
+
+SELECT 
+    reward_code,
+    reward_description,
+    start_dt,
+    end_dt,
+    reward_per
+FROM dynamic_rewards
+WHERE NOT (reward_code = 'AR*' AND start_dt >= date '2026-01-01')
+UNION ALL
+SELECT 
+    reward_code,
+    reward_description,
+    start_dt,
+    end_dt,
+    reward_per
+FROM static_rewards
+UNION ALL
+SELECT 
+    reward_code,
+    reward_description,
+    start_dt,
+    end_dt,
+    reward_per
+FROM subsidized_rewards
+ORDER BY start_dt DESC, reward_code;

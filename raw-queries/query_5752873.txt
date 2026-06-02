@@ -1,0 +1,75 @@
+WITH 
+-- Define date range constants for the query
+date_constants AS (
+    SELECT
+        DATE '2024-09-04' AS start_date,  -- Query start date
+        CURRENT_DATE AS end_date          -- Query end date (today)
+),
+
+-- Extract all sUSDS transaction exchange rate data
+susds_realtime_rates_raw AS (
+    SELECT 
+        evt_block_time,                                           -- Transaction timestamp
+        evt_index,                                                -- Event index for ordering
+        cast(assets as double) / cast(shares as double) as susds_conversion_rate  -- Calculate conversion rate
+    FROM (
+        -- Get all deposit transactions
+        SELECT evt_block_time, evt_index, assets, shares 
+        FROM sky_ethereum.susds_evt_deposit 
+        CROSS JOIN date_constants dc
+        WHERE shares > 0                                          -- Filter out zero-share transactions
+        AND evt_block_time >= dc.start_date                       -- Filter by start date
+        AND evt_block_time <= dc.end_date + INTERVAL '1' DAY      -- Filter by end date (inclusive)
+        
+        UNION ALL
+        
+        -- Get all withdrawal transactions
+        SELECT evt_block_time, evt_index, assets, shares 
+        FROM sky_ethereum.susds_evt_withdraw 
+        CROSS JOIN date_constants dc
+        WHERE shares > 0                                          -- Filter out zero-share transactions
+        AND evt_block_time >= dc.start_date                       -- Filter by start date
+        AND evt_block_time <= dc.end_date + INTERVAL '1' DAY      -- Filter by end date (inclusive)
+    )
+),
+
+-- Get the last exchange rate for each day
+daily_last_rates AS (
+    SELECT 
+        DATE(evt_block_time) as dt,                               -- Extract date from timestamp
+        MAX_BY(susds_conversion_rate, evt_block_time) as susds_conversion_rate  -- Get rate at latest time each day
+    FROM susds_realtime_rates_raw
+    GROUP BY DATE(evt_block_time)                                 -- Group by date
+),
+
+-- Generate complete date sequence for the specified range
+date_series AS (
+    SELECT dt
+    FROM UNNEST(
+        SEQUENCE(
+            (SELECT start_date FROM date_constants),              -- Start of sequence
+            (SELECT end_date FROM date_constants),                -- End of sequence
+            INTERVAL '1' DAY                                      -- Daily increment
+        )
+    ) AS t(dt)
+),
+
+-- Fill missing dates with previous day's exchange rate
+complete_daily_rates AS (
+    SELECT 
+        ds.dt,                                                    -- Date from complete series
+        COALESCE(
+            dlr.susds_conversion_rate,                            -- Use actual rate if available
+            LAST_VALUE(dlr.susds_conversion_rate) IGNORE NULLS   -- Otherwise use previous non-null rate
+            OVER (ORDER BY ds.dt ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+        ) as susds_conversion_rate
+    FROM date_series ds
+    LEFT JOIN daily_last_rates dlr ON ds.dt = dlr.dt             -- Join with actual rates
+)
+
+-- Final output with rate change calculations
+SELECT 
+    dt,                                                           -- Date
+    susds_conversion_rate                                        -- Daily exchange rate
+FROM complete_daily_rates
+ORDER BY dt DESC                                                  -- Order by date descending (newest first)

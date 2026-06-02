@@ -1,0 +1,9 @@
+node_modules/
+dist/
+data/
+.env
+*.js.map
+.cache/
+logs/
+dune-results/
+payouts/

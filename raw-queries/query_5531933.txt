@@ -1,0 +1,80 @@
+with -- Token targets
+token_targets (
+    blockchain,
+    token_symbol,
+    token_addr,
+    decimals,
+    start_date
+) as (
+    values
+        (
+            'ethereum',
+            'USDS',
+            0xdC035D45d973E3EC169d2276DDab16f1e407384F,
+            18,
+            date '2024-09-02'
+        )
+),
+-- Protocol targets
+spark_targets (
+    code,
+    reward_code,
+    interest_code,
+    ref_code,
+    blockchain,
+    protocol_name,
+    protocol_addr,
+    start_date
+) as (
+    values
+        -- Spark Proxy (Treasury)
+        (
+            3,
+            'AR',
+            'BR',
+            126,
+            'ethereum',
+            'Treasury',
+            0x3300f198988e4C9C63F75dF86De36421f06af8c4,
+            date '2023-05-26'
+        )
+),
+protocol_balances_cum as (
+    select
+        b.blockchain,
+        b.user_addr as protocol_addr,
+        tt.token_symbol,
+        b.dt,
+        st.reward_code,
+        st.protocol_name,
+        st.ref_code,
+        b.time_weighted_avg_balance
+    from query_5681585 b
+    join token_targets tt
+        on b.blockchain = tt.blockchain
+        and b.contract_address = tt.token_addr
+    join spark_targets st
+        on b.blockchain = st.blockchain
+        and b.user_addr = st.protocol_addr
+)
+select
+    b.dt,
+    b.blockchain,
+    b.token_symbol as token,
+    b.ref_code,
+    'Spark referrals' as referral_type,
+    b.reward_code,
+    p.reward_per,
+    b.time_weighted_avg_balance as amount,
+    b.time_weighted_avg_balance / 365 * reward_per as tw_reward,
+    avg(b.time_weighted_avg_balance) over (
+        partition by b.blockchain,
+        b.ref_code
+        order by b.dt rows between 6 preceding
+            and current row
+    ) as amount_7d_avg
+from protocol_balances_cum b
+join query_5353955 p -- Spark - Accessibility Rewards - Rates
+    on b.reward_code = p.reward_code
+    and b.dt between p.start_dt
+    and p.end_dt

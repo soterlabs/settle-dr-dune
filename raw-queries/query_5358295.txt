@@ -1,0 +1,56 @@
+with
+spUSDC_balances as (
+    select
+        dt,
+        blockchain,
+        contract_address,
+        symbol,
+        user_addr,
+        time_weighted_avg_balance,
+        ref_code
+    from dune.sparkdotfi.result_spark_sp_usdc_sp_usdt_sp_eth_time_weighted_average_balance
+    where
+        time_weighted_avg_balance > 0
+),
+
+total_balance_ref as (
+    select
+        b.dt,
+        b.blockchain,
+        b.contract_address,
+        b.symbol as token,
+        b.ref_code,
+        sum(b.time_weighted_avg_balance) as amount
+    from spUSDC_balances b
+    group by 1, 2, 3, 4, 5
+),
+
+deployment_ratios as (
+    select
+        dt,
+        blockchain,
+        vault_symbol,
+        deployment_ratio
+    from query_6398769
+)
+
+select
+    t.dt,
+    t.blockchain,
+    t.contract_address,
+    t.token,
+    t.ref_code,
+    t.amount,
+    case
+        when t.token = 'spETH' then 0
+        else t.amount * coalesce(d.deployment_ratio, 0)
+    end as amount_deployed
+from total_balance_ref t
+left join deployment_ratios d
+    on t.dt = d.dt
+    and t.blockchain = d.blockchain
+    and t.token = d.vault_symbol
+order by t.dt desc,
+    t.blockchain asc,
+    t.token asc,
+    t.ref_code asc

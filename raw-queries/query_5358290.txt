@@ -1,0 +1,40 @@
+with
+    
+    -- stUSDS balance data from the pre-computed table
+    stusds_balances as (
+        select 
+            dt,
+            blockchain,
+            contract_address,
+            user_addr,
+            time_weighted_avg_balance,
+            case when ref_code = -999999 then 99 else ref_code end as ref_code
+        from query_5358161
+        where time_weighted_avg_balance > 0
+    ),
+    
+    -- Token targets for labeling
+    token_targets (blockchain, symbol, contract_address) as (
+        values
+            ('ethereum', 'stUSDS', 0x99CD4Ec3f88A45940936F469E4bB72A2A701EEB9)
+    ),
+    
+    -- Final aggregation by referral code
+    total_balance_ref as (
+        select
+            b.dt,
+            b.blockchain,
+            b.contract_address,
+            tt.symbol as token,
+            b.ref_code,
+            sum(b.time_weighted_avg_balance) as amount
+        from stusds_balances b
+        join token_targets tt on (
+            b.blockchain = tt.blockchain 
+            and b.contract_address = tt.contract_address
+        )
+        group by 1,2,3,4,5
+    )
+
+select * from total_balance_ref 
+order by dt desc, blockchain asc, token asc, ref_code asc

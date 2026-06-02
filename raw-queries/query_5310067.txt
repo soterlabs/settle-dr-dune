@@ -1,0 +1,20 @@
+with
+    -- Final aggregation by referral code
+    total_balance_ref as (
+        select
+            b.dt,
+            b.blockchain,
+            b.contract_address,
+            b.symbol as token,
+            case 
+                when b.symbol='sUSDC' and b.ref_code=-999999 then 127 
+                when b.symbol='sUSDS' and b.ref_code=-999999 then 99 
+                else b.ref_code 
+            end as ref_code,
+            sum(b.time_weighted_avg_balance) as amount
+        from dune.sparkdotfi.result_spark_s_usds_s_usdc_time_weighted_average_balance b
+        group by 1,2,3,4,5
+    )
+
+select * from total_balance_ref 
+order by dt desc, blockchain asc, token asc, ref_code asc

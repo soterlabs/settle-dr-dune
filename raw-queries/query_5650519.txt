@@ -1,0 +1,19 @@
+select
+    date_trunc('month', b.dt) as dt,
+    b.token_symbol,
+    b.token,
+    b.blockchain,
+    b.referral_type,
+    b.ref_code,
+    sum(tw_reward) as tw_reward,
+    sum(tw_reward * price_usd) / sum(tw_reward) as price_usd,
+    sum(tw_reward_usd) as tw_reward_usd
+from query_5615313 b
+where dt >= date '2025-07-01'
+and b.token_symbol <> 'spETH'
+group by 1, 2, 3, 4, 5, 6
+order by dt desc,
+    token_symbol desc,
+    token desc,
+    blockchain asc,
+    ref_code asc

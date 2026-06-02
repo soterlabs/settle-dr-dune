@@ -1,0 +1,67 @@
+WITH 
+date_constants AS (
+    SELECT
+        DATE '2025-08-25' AS start_date,
+        CURRENT_DATE AS end_date
+),
+
+stusds_realtime_rates_raw AS (
+    SELECT 
+        evt_block_time,
+        evt_index,
+        cast(assets as double) / cast(shares as double) as stusds_conversion_rate
+    FROM (
+        SELECT evt_block_time, evt_index, assets, shares 
+        FROM sky_ethereum.stusds_evt_deposit 
+        CROSS JOIN date_constants dc
+        WHERE shares > 0
+        AND evt_block_time >= dc.start_date
+        AND evt_block_time <= dc.end_date + INTERVAL '1' DAY
+        
+        UNION ALL
+        
+        SELECT evt_block_time, evt_index, assets, shares 
+        FROM sky_ethereum.stusds_evt_withdraw 
+        CROSS JOIN date_constants dc
+        WHERE shares > 0
+        AND evt_block_time >= dc.start_date
+        AND evt_block_time <= dc.end_date + INTERVAL '1' DAY
+    )
+),
+
+daily_last_rates AS (
+    SELECT 
+        DATE(evt_block_time) as dt,
+        MAX_BY(stusds_conversion_rate, evt_block_time) as stusds_conversion_rate
+    FROM stusds_realtime_rates_raw
+    GROUP BY DATE(evt_block_time)
+),
+
+date_series AS (
+    SELECT dt
+    FROM UNNEST(
+        SEQUENCE(
+            (SELECT start_date FROM date_constants),
+            (SELECT end_date FROM date_constants),
+            INTERVAL '1' DAY
+        )
+    ) AS t(dt)
+),
+
+complete_daily_rates AS (
+    SELECT 
+        ds.dt,
+        COALESCE(
+            dlr.stusds_conversion_rate,
+            LAST_VALUE(dlr.stusds_conversion_rate) IGNORE NULLS
+            OVER (ORDER BY ds.dt ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+        ) as stusds_conversion_rate
+    FROM date_series ds
+    LEFT JOIN daily_last_rates dlr ON ds.dt = dlr.dt
+)
+
+SELECT 
+    dt,
+    coalesce(stusds_conversion_rate,1) as stusds_conversion_rate
+FROM complete_daily_rates
+ORDER BY dt DESC
