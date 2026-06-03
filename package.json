@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc",
     "save-queries": "tsx src/scripts/save-dune-queries.ts",
-    "run-query": "tsx src/scripts/run-dune-query.ts"
+    "run-query": "tsx src/scripts/run-dune-query.ts",
+    "combine": "tsx src/scripts/combine-dr-results.ts"
   },
   "keywords": [],
   "author": "",

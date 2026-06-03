@@ -215,12 +215,36 @@ with
         group by blockchain, contract_address, user_addr, dt, current_ref_code
     ),
 
+    user_final_balance as (
+        select blockchain, contract_address, user_addr, end_of_day_balance as final_balance
+        from (
+            select blockchain, contract_address, user_addr, dt, end_of_day_balance,
+                   row_number() over (
+                       partition by blockchain, contract_address, user_addr
+                       order by dt desc
+                   ) as rn
+            from daily_end_balances
+        ) t
+        where rn = 1
+    ),
+
     user_date_ranges as (
-        select blockchain, contract_address, user_addr,
-               min(dt) as first_transaction_date,
-               greatest(max(dt), current_date) as last_transaction_date
-        from daily_end_balances
-        group by 1, 2, 3
+        -- COST/PERF: only extend the no-transaction-day fill to current_date for
+        -- users who STILL hold a balance. Users whose final balance is ~0 are
+        -- trimmed at their last transaction day (they accrue nothing afterward),
+        -- avoiding hundreds of zero-balance idle rows per exited user across full
+        -- history (the dominant cost / 30-min-timeout cause).
+        select deb.blockchain, deb.contract_address, deb.user_addr,
+               min(deb.dt) as first_transaction_date,
+               case when ufb.final_balance > 1e-9
+                    then greatest(max(deb.dt), current_date)
+                    else max(deb.dt) end as last_transaction_date
+        from daily_end_balances deb
+        join user_final_balance ufb
+            on deb.blockchain = ufb.blockchain
+            and deb.contract_address = ufb.contract_address
+            and deb.user_addr = ufb.user_addr
+        group by deb.blockchain, deb.contract_address, deb.user_addr, ufb.final_balance
     ),
 
     complete_user_dates as (

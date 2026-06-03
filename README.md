@@ -27,21 +27,19 @@ Dune query IDs.
 
 ```
 queries/          Core SQL — all Dune queries, fully documented
-  twa_*.sql       Layer 0/1: per-user daily TWA balance + ref_code
-  rates_dr.sql    Layer 3a: XR/XR*/XR-stUSDS reward rates
-  conversion_*.sql Layer 3b: share→USD conversion
-  dr_rewards_daily.sql   Layer 2+3: daily DR revenue (all ref_codes)
-  dr_rewards_rollup.sql  Layer 4: all-time rollup per ref_code
-  README.md       Schema, wiring table, known placeholders
+  twa_*.sql                  Layer 0/1: per-user daily TWA balance + ref_code
+  rates_dr.sql               Layer 3a: XR/XR*/XR-stUSDS reward rates
+  conversion_*.sql           Layer 3b: share→USD conversion
+  dr_rewards_monthly_*.sql   Layer 2+3: monthly DR revenue, one per source (RUN THESE)
+  README.md                  Schema, wiring table, known placeholders
 
 raw-queries/      Reference copies of Spark's original Dune queries
                   (read-only; used to verify our methodology)
 
 src/scripts/      Helper TypeScript scripts
-  save-dune-queries.ts     Deploy/re-deploy all queries to Dune
-  update-dune-date-params.ts  Patch end_date parameter on foundational queries
+  save-dune-queries.ts     Deploy/re-deploy queries to Dune
   run-dune-query.ts        Execute a single SQL file via the Dune API
-  discover-dune-tables.ts  Probe Dune metadata for table/column discovery
+  combine-dr-results.ts    Merge the 5 monthly outputs into per-ref_code rollups
 
 docs/             Background analysis and project documentation
 ```
@@ -50,36 +48,59 @@ docs/             Background analysis and project documentation
 
 ## Saved Dune query IDs
 
+**Run these five monthly queries** (each is self-contained; it auto-inlines the
+foundational + helper queries it needs, so those never need to be run on their own):
+
 | File | Dune ID |
 |---|---|
-| `twa_susds_susdc_erc4626.sql` | [7640317](https://dune.com/queries/7640317) |
-| `twa_susds_psm3_l2.sql` | [7640318](https://dune.com/queries/7640318) |
-| `twa_stusds.sql` | [7640319](https://dune.com/queries/7640319) |
-| `twa_usds_staking_farms.sql` | [7640320](https://dune.com/queries/7640320) |
-| `twa_sp_vaults.sql` | [7640321](https://dune.com/queries/7640321) |
-| `rates_dr.sql` | [7640322](https://dune.com/queries/7640322) |
-| `conversion_susds.sql` | [7640323](https://dune.com/queries/7640323) |
-| `conversion_stusds.sql` | [7640324](https://dune.com/queries/7640324) |
-| `conversion_sp_vaults.sql` | [7640325](https://dune.com/queries/7640325) |
-| `dr_rewards_daily.sql` | [7640326](https://dune.com/queries/7640326) |
-| `dr_rewards_rollup.sql` | [7640327](https://dune.com/queries/7640327) |
+| `dr_rewards_monthly_susds_susdc.sql` | [7646377](https://dune.com/queries/7646377) |
+| `dr_rewards_monthly_psm3_base.sql` | [7647196](https://dune.com/queries/7647196) — DOES NOT RUN (times out); disabled in combine |
+| `dr_rewards_monthly_psm3_arbitrum.sql` | [7647197](https://dune.com/queries/7647197) |
+| `dr_rewards_monthly_psm3_optimism.sql` | [7647198](https://dune.com/queries/7647198) |
+| `dr_rewards_monthly_psm3_unichain.sql` | [7647199](https://dune.com/queries/7647199) |
+| `dr_rewards_monthly_stusds.sql` | [7646379](https://dune.com/queries/7646379) |
+| `dr_rewards_monthly_farms.sql` | [7646380](https://dune.com/queries/7646380) |
+| `dr_rewards_monthly_sp.sql` | [7646382](https://dune.com/queries/7646382) |
 
-Run order: foundational queries (7640317–7640321) and helpers
-(7640322–7640325) first (independently), then 7640326, then 7640327.
+Referenced (do **not** run directly): foundational `twa_*` = 7640317–7640321;
+helpers `rates_dr`/`conversion_*` = 7640322–7640325. See `queries/README.md` for
+the full wiring table.
 
-The `{{end_date}}` parameter on foundational queries (default `2030-01-01`)
-controls the scan cutoff and therefore cost. Set it to e.g.
-`2025-09-01 00:00:00` for a cheaper one-year test run.
+### How to run everything
+
+1. Run the **five monthly queries** above on Dune (any order, independent). Each
+   recomputes its one foundational query inline and aggregates to monthly, so the
+   result is only a few thousand rows. Full history (from 2024-09-01) runs by
+   default — no parameter needed.
+2. Merge them into the cross-asset per-`ref_code` rollup locally:
+   ```bash
+   DUNE_API_KEY=<key> npm run combine
+   ```
+   Writes `dr_monthly_combined.csv`, `dr_rollup_by_refcode.csv`, and
+   `dr_rollup_by_refcode_token.csv` to `dune-results/`.
+
+The retired combined queries (7640326 daily, 7640327 rollup) are archived — a
+single query combining all five sources exceeds Dune's stage limit (see
+`queries/README.md`).
 
 ---
 
 ## Known gap: sp* deployment ratio
 
-`dr_rewards_daily.sql` hardcodes `sp_deployment_ratio = 0.5` — this is
+`dr_rewards_monthly_sp.sql` hardcodes `sp_deployment_ratio = 0.5` — this is
 **deliberately wrong** to make sp* revenue figures obviously incorrect.
 Spark's real value is a per-day TWA computed from an opaque internal dataset
 (`query_6398769`); Amatsu used a flat `0.9`. Neither is reproduced here yet.
 All other tokens (sUSDS, sUSDC, stUSDS, USDS farms) are fully transparent.
+
+## Known gap: Base L2 sUSDS (PSM3) is missing
+
+`dr_rewards_monthly_psm3_base.sql` (7647196) **always hits Dune's 30-minute
+execution limit** and never returns a result, so it is **disabled** in
+`combine-dr-results.ts`. Base L2 sUSDS DR revenue is therefore **undercounted**
+in the combined rollup. The other three PSM3 chains (Arbitrum/Optimism/Unichain)
+run fine. To fix, split Base further (by year/quarter via `{{end_date}}`) and
+union client-side, or pre-materialize on a paid plan.
 
 ---
 

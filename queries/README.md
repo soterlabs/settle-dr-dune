@@ -50,18 +50,46 @@ The five `twa_*.sql` queries above are Layer 0/1 (per-user daily TWA **balance**
 | [`conversion_susds.sql`](conversion_susds.sql) | 3b | sUSDS share→USDS daily rate (also used for sUSDC) | `query_5752873` |
 | [`conversion_stusds.sql`](conversion_stusds.sql) | 3b | stUSDS share→USDS daily rate | `query_5449435` |
 | [`conversion_sp_vaults.sql`](conversion_sp_vaults.sql) | 3b | sp\* share→USD (spETH × WETH price) | `query_5357785` |
-| [`dr_rewards_daily.sql`](dr_rewards_daily.sql) | 2+3 | union balances → ×rate → ×conversion → daily `tw_reward_usd` | `xr-ar-rewards-daily-raw.txt` |
-| [`dr_rewards_rollup.sql`](dr_rewards_rollup.sql) | 4 | per-`ref_code` all-asset/all-chain/all-time revenue | — |
+| [`dr_rewards_monthly_susds_susdc.sql`](dr_rewards_monthly_susds_susdc.sql) | 2+3 | sUSDS/sUSDC → monthly `dr_usd` | `xr-ar-rewards-daily-raw.txt` |
+| [`dr_rewards_monthly_psm3_base.sql`](dr_rewards_monthly_psm3_base.sql) | 2+3 | L2 sUSDS (PSM3, Base) → monthly `dr_usd` — **always times out; disabled in combine** | " |
+| [`dr_rewards_monthly_psm3_arbitrum.sql`](dr_rewards_monthly_psm3_arbitrum.sql) | 2+3 | L2 sUSDS (PSM3, Arbitrum) → monthly `dr_usd` | " |
+| [`dr_rewards_monthly_psm3_optimism.sql`](dr_rewards_monthly_psm3_optimism.sql) | 2+3 | L2 sUSDS (PSM3, Optimism) → monthly `dr_usd` | " |
+| [`dr_rewards_monthly_psm3_unichain.sql`](dr_rewards_monthly_psm3_unichain.sql) | 2+3 | L2 sUSDS (PSM3, Unichain) → monthly `dr_usd` | " |
+| [`dr_rewards_monthly_stusds.sql`](dr_rewards_monthly_stusds.sql) | 2+3 | stUSDS → monthly `dr_usd` | " |
+| [`dr_rewards_monthly_farms.sql`](dr_rewards_monthly_farms.sql) | 2+3 | USDS farms → monthly `dr_usd` | " |
+| [`dr_rewards_monthly_sp.sql`](dr_rewards_monthly_sp.sql) | 2+3 | sp\* vaults → monthly `dr_usd` | " |
+
+### Why five per-source queries instead of one combined query
+
+Dune's `query_<id>` reference is a **view**: it inlines the referenced query's SQL
+and re-executes it. A single query that combined all five sources (the old
+`dr_rewards_daily` / `dr_rewards_rollup`) therefore inlined all five heavy
+foundational TWA queries at once and failed with **"this query has too many
+stages and is too complex to execute."** Materialized views would fix this but
+require a paid plan + cron scheduling.
+
+The fix: one **per-source** query each referencing **exactly one** foundational
+query, aggregated to **monthly** grain `(month, blockchain, token, ref_code)`.
+Each stays under the stage limit, and the monthly output is only a few thousand
+rows (the per-user-per-day explosion is collapsed by the `GROUP BY` before any
+result is returned — so the foundational queries never need to be run or stored
+on their own). The cross-asset, per-`ref_code` rollup is then merged from the
+five small outputs **client-side** via
+[`src/scripts/combine-dr-results.ts`](../src/scripts/combine-dr-results.ts)
+(the old `dr_rewards_rollup` is retired/archived).
 
 **Reward rate is per-(token-class, date), NOT per-ref_code.** `rates_dr.sql` keys only on the token's reward code (`XR` for sUSDS/USDS farms, `XR*` for sUSDC/sp\*, `XR-stUSDS` for stUSDS) and the date. The Spark/non-Spark "referral_type" split is a *display label only* and does not change the rate. This corrects the code-tier approximation in `src/scripts/reconstruct-128/rates.ts`, and means the stUSDS payout drop from 2026 is simply the standard `XR-stUSDS` 0.1%-APY rate (not a per-code DB override).
 
 ### Known placeholders / not-yet-implemented
 
-- **sp\* deployment ratio is hardcoded to `0.5` in `dr_rewards_daily.sql` and is deliberately wrong.** Spark applies a per-day TWA deployment ratio (`vault_deployed / vault_total`) sourced from an *opaque* dataset (`result_spark_savings_v_2_vaults_time_weighted_average_holdings`, via `query_6398769`); Amatsu uses a flat `0.9`. We use `0.5` on purpose so sp\* numbers (spUSDC/spUSDT/spPYUSD/spETH) are obviously off and this gap cannot be shipped silently. **Replace before trusting any sp\* revenue.** Everything else (sUSDS, sUSDC, stUSDS, USDS farms) is fully transparent end-to-end.
+- **sp\* deployment ratio is hardcoded to `0.5` in `dr_rewards_monthly_sp.sql` and is deliberately wrong.** Spark applies a per-day TWA deployment ratio (`vault_deployed / vault_total`) sourced from an *opaque* dataset (`result_spark_savings_v_2_vaults_time_weighted_average_holdings`, via `query_6398769`); Amatsu uses a flat `0.9`. We use `0.5` on purpose so sp\* numbers (spUSDC/spUSDT/spPYUSD/spETH) are obviously off and this gap cannot be shipped silently. **Replace before trusting any sp\* revenue.** Everything else (sUSDS, sUSDC, stUSDS, USDS farms) is fully transparent end-to-end.
 
-### Wiring
+### Wiring (saved Dune query IDs)
 
-`dr_rewards_daily.sql` and `dr_rewards_rollup.sql` reference other queries by Dune query ID (the standard Dune composition pattern, same as `validate_against_spark.sql`). All 11 queries have been **saved as public Dune queries** and the placeholders are already wired to these IDs (via `src/scripts/save-dune-queries.ts`):
+The monthly queries reference the foundational + helper queries by Dune query ID
+(the standard composition pattern). All are saved as public Dune queries.
+
+**Foundational (Layer 0/1) + helpers (Layer 3) — referenced, not run directly:**
 
 | File | Saved Dune query ID |
 |---|---|
@@ -74,12 +102,30 @@ The five `twa_*.sql` queries above are Layer 0/1 (per-user daily TWA **balance**
 | `conversion_susds.sql` | [7640323](https://dune.com/queries/7640323) |
 | `conversion_stusds.sql` | [7640324](https://dune.com/queries/7640324) |
 | `conversion_sp_vaults.sql` | [7640325](https://dune.com/queries/7640325) |
-| `dr_rewards_daily.sql` | [7640326](https://dune.com/queries/7640326) |
-| `dr_rewards_rollup.sql` | [7640327](https://dune.com/queries/7640327) |
 
-The four helper queries (`rates_dr`, `conversion_*`) have been run successfully against Dune. `dr_rewards_daily` (7640326) / `dr_rewards_rollup` (7640327) are pure wiring + the same logic as Spark's proven engine; running the rollup triggers a full-history scan of all five foundational queries.
+**Monthly revenue (Layer 2+3) — these are the ones you RUN:**
 
-> If you re-edit a foundational `.sql` locally, push the change to its saved query (the references use the saved version, not your local file).
+| File | Saved Dune query ID | References |
+|---|---|---|
+| `dr_rewards_monthly_susds_susdc.sql` | [7646377](https://dune.com/queries/7646377) | 7640317, 7640322, 7640323 |
+| `dr_rewards_monthly_psm3_base.sql` | [7647196](https://dune.com/queries/7647196) | **DOES NOT RUN — always times out (30 min). DISABLED in combine; Base L2 sUSDS revenue is missing.** inline + 7640322, 7640323 |
+| `dr_rewards_monthly_psm3_arbitrum.sql` | [7647197](https://dune.com/queries/7647197) | inline + 7640322, 7640323 |
+| `dr_rewards_monthly_psm3_optimism.sql` | [7647198](https://dune.com/queries/7647198) | inline + 7640322, 7640323 |
+| `dr_rewards_monthly_psm3_unichain.sql` | [7647199](https://dune.com/queries/7647199) | inline + 7640322, 7640323 |
+| `dr_rewards_monthly_stusds.sql` | [7646379](https://dune.com/queries/7646379) | 7640319, 7640322, 7640324 |
+| `dr_rewards_monthly_farms.sql` | [7646380](https://dune.com/queries/7646380) | 7640320, 7640322 |
+| `dr_rewards_monthly_sp.sql` | [7646382](https://dune.com/queries/7646382) | 7640321, 7640322, 7640325 |
+
+The cross-asset per-`ref_code` rollup is produced by
+[`src/scripts/combine-dr-results.ts`](../src/scripts/combine-dr-results.ts), which
+merges the five monthly outputs. The retired combined queries
+`dr_rewards_daily` (7640326) and `dr_rewards_rollup` (7640327) are **archived** on
+Dune (they hit the stage limit and are superseded).
+
+> The `query_<id>` references use the **saved** version of each query, not your
+> local `.sql` file. If you edit a foundational/helper `.sql` locally, push it to
+> its saved query (e.g. via `src/scripts/save-dune-queries.ts` or the Dune UI)
+> before re-running the monthly queries.
 
 ## Target matrix (from §6.1 of the settlement-handover review)
 
