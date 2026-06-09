@@ -44,6 +44,17 @@ function parseMonthCol(col: string): string | null {
   return mm ? `${m[2]}-${mm}` : null;
 }
 
+/**
+ * ref_codes that represent untagged / no-referral TVL.
+ * These rows are separated to the bottom of every tab.
+ */
+const UNTAGGED_CODES = new Set([
+  '-999999', '99', '123623963915635', '90000000000000000000', 'untagged',
+]);
+
+/** Note applied to ref_code 126 on every Diff tab. */
+const NOTE_126 = 'Subproxy holdings, no DR applied. Handled in Supply Side MSC.';
+
 /** Numeric ref_codes ascending, then non-numeric alphabetically. */
 function sortedCodes(codes: Iterable<string>): string[] {
   return [...codes].sort((a, b) => {
@@ -71,11 +82,17 @@ function refCell(code: string): string | number {
 /**
  * Build AOA for a data tab: [ref_code, month…, total] per sorted ref_code.
  * Missing month values are left blank (empty string) so Excel displays no value.
+ * Untagged ref_codes are separated to the bottom with a blank divider row.
  */
 function buildAoa(data: DataMap, months: string[]): (string | number)[][] {
-  const codes = sortedCodes([...data.keys()]);
+  const allCodes = sortedCodes([...data.keys()]);
+  const taggedCodes   = allCodes.filter(c => !UNTAGGED_CODES.has(c));
+  const untaggedCodes = allCodes.filter(c =>  UNTAGGED_CODES.has(c));
+
   const header: (string | number)[] = ['ref_code', ...months, 'total'];
-  const rows: (string | number)[][] = codes.map(code => {
+  const blankRow: (string | number)[] = Array(header.length).fill('');
+
+  const makeRow = (code: string): (string | number)[] => {
     const mm = data.get(code) ?? new Map<string, number>();
     const vals = months.map(m => {
       const v = mm.get(m);
@@ -83,15 +100,25 @@ function buildAoa(data: DataMap, months: string[]): (string | number)[][] {
     });
     const total = round2(vals.reduce<number>((s, v) => s + (typeof v === 'number' ? v : 0), 0));
     return [refCell(code), ...vals, total];
-  });
-  return [header, ...rows];
+  };
+
+  const untaggedHeader: (string | number)[] = ['── untagged ──', ...Array(header.length - 1).fill('')];
+
+  return [
+    header,
+    ...taggedCodes.map(makeRow),
+    ...(untaggedCodes.length > 0 ? [blankRow, untaggedHeader, ...untaggedCodes.map(makeRow)] : []),
+  ];
 }
 
 /**
  * Build AOA for a diff tab: source1 − source2.
  * Shows the UNION of both datasets' ref_codes; missing side treated as 0.
  * Months are the provided overlapping slice.
+ * Columns: ref_code | present_in | notes | month… | total_diff
  * A `present_in` column flags codes that exist in only one source.
+ * A `notes` column carries ref_code-specific annotations (e.g. ref 126).
+ * Untagged ref_codes are separated to the bottom with a blank divider row.
  */
 function buildDiffAoa(
   d1: DataMap,
@@ -100,18 +127,34 @@ function buildDiffAoa(
   label1: string,
   label2: string,
 ): (string | number)[][] {
-  const allCodes = sortedCodes([...new Set([...d1.keys(), ...d2.keys()])]);
-  const header: (string | number)[] = ['ref_code', 'present_in', ...months, 'total_diff'];
-  const rows: (string | number)[][] = allCodes.map(code => {
+  const allCodes    = sortedCodes([...new Set([...d1.keys(), ...d2.keys()])]);
+  const taggedCodes   = allCodes.filter(c => !UNTAGGED_CODES.has(c));
+  const untaggedCodes = allCodes.filter(c =>  UNTAGGED_CODES.has(c));
+
+  const header: (string | number)[] = ['ref_code', 'present_in', ...months, 'total_diff', 'notes'];
+  const blankRow: (string | number)[] = Array(header.length).fill('');
+
+  const makeRow = (code: string): (string | number)[] => {
     const has1 = d1.has(code), has2 = d2.has(code);
     const present = has1 && has2 ? 'both' : has1 ? `${label1} only` : `${label2} only`;
+    const notes = code === '126' ? NOTE_126
+                : code === '130' ? 'Found in Spark datasets only, no onchain events.'
+                : code === '0' || code === '1' ? 'Diff vs Spark = Chronicle farm (USDS-CLE) only. Spark does not track this farm.'
+                : '';
     const m1 = d1.get(code) ?? new Map<string, number>();
     const m2 = d2.get(code) ?? new Map<string, number>();
     const diffs = months.map(m => round2((m1.get(m) ?? 0) - (m2.get(m) ?? 0)));
     const totalDiff = round2(diffs.reduce<number>((s, v) => s + v, 0));
-    return [refCell(code), present, ...diffs, totalDiff];
-  });
-  return [header, ...rows];
+    return [refCell(code), present, ...diffs, totalDiff, notes];
+  };
+
+  const untaggedHeader: (string | number)[] = ['── untagged ──', ...Array(header.length - 1).fill('')];
+
+  return [
+    header,
+    ...taggedCodes.map(makeRow),
+    ...(untaggedCodes.length > 0 ? [blankRow, untaggedHeader, ...untaggedCodes.map(makeRow)] : []),
+  ];
 }
 
 // ─── CSV parser ───────────────────────────────────────────────────────────────
@@ -277,10 +320,17 @@ function renameSparkUntagged(data: DataMap): DataMap {
 
 // ─── workbook assembly ────────────────────────────────────────────────────────
 
+
 function addSheet(wb: import('xlsx').WorkBook, aoa: (string | number)[][], name: string): void {
   const ws = utils.aoa_to_sheet(aoa);
   const numCols = aoa[0]?.length ?? 0;
-  ws['!cols'] = Array.from({ length: numCols }, (_, i) => ({ wch: i === 0 ? 14 : i === 1 && String(aoa[0]?.[1]) === 'present_in' ? 14 : 13 }));
+  const headers = (aoa[0] ?? []).map(String);
+  ws['!cols'] = Array.from({ length: numCols }, (_, i) => {
+    if (headers[i] === 'ref_code')   return { wch: 20 };
+    if (headers[i] === 'present_in') return { wch: 14 };
+    if (headers[i] === 'notes')      return { wch: 55 };
+    return { wch: 13 };
+  });
   utils.book_append_sheet(wb, ws, name);
 }
 
@@ -305,26 +355,29 @@ function main(): void {
   const ourForAmatsu   = mergeOurUntagged(ourData);
   const sparkForAmatsu = renameSparkUntagged(sparkData);
 
-  // Overlapping months for ours-vs-spark (both have 2026-01..2026-06 currently)
+  // Overlapping months for ours-vs-spark
   const ourSparkMonths = ourMonths.filter(m => sparkMonths.includes(m));
 
   console.log(`  Our Data : ${ourMonths.length} months, ${ourData.size} ref_codes`);
   console.log(`  Spark    : ${sparkMonths.length} months, ${sparkData.size} ref_codes`);
   console.log(`  Amatsu   : ${amatsuMonths.length} months, ${amatsuData.size} ref_codes`);
 
-  const wb = utils.book_new();
-
-  addSheet(wb, buildAoa(ourData,   ourMonths),       'Our Data');
-  addSheet(wb, buildAoa(sparkData, sparkMonths),     'Spark');
-  addSheet(wb, buildAoa(amatsuData, amatsuMonths),   'Amatsu');
-  addSheet(wb, buildDiffAoa(ourData,        sparkData,  ourSparkMonths, 'ours',  'spark'),  'Diff Ours-Spark');
-  addSheet(wb, buildDiffAoa(ourForAmatsu,   amatsuData, amatsuMonths,  'ours',  'amatsu'), 'Diff Ours-Amatsu');
-  addSheet(wb, buildDiffAoa(sparkForAmatsu, amatsuData, amatsuMonths,  'spark', 'amatsu'), 'Diff Spark-Amatsu');
+  const tabs: Array<{ name: string; aoa: (string | number)[][] }> = [
+    { name: 'Our Data',          aoa: buildAoa(ourData,        ourMonths)                                        },
+    { name: 'Spark',             aoa: buildAoa(sparkData,      sparkMonths)                                      },
+    { name: 'Amatsu',            aoa: buildAoa(amatsuData,     amatsuMonths)                                     },
+    { name: 'Diff Ours-Spark',   aoa: buildDiffAoa(ourData,        sparkData,  ourSparkMonths, 'ours',  'spark') },
+    { name: 'Diff Ours-Amatsu',  aoa: buildDiffAoa(ourForAmatsu,   amatsuData, amatsuMonths,   'ours',  'amatsu') },
+    { name: 'Diff Spark-Amatsu', aoa: buildDiffAoa(sparkForAmatsu, amatsuData, amatsuMonths,   'spark', 'amatsu') },
+  ];
 
   if (!fs.existsSync(path.dirname(outFile))) fs.mkdirSync(path.dirname(outFile), { recursive: true });
+  const wb = utils.book_new();
+  for (const { name, aoa } of tabs) addSheet(wb, aoa, name);
   writeFile(wb, outFile);
+
   console.log(`\nWritten: ${path.relative(root, outFile)}`);
-  console.log('Tabs: Our Data | Spark | Amatsu | Diff Ours-Spark | Diff Ours-Amatsu | Diff Spark-Amatsu');
+  console.log('Tabs: ' + tabs.map(t => t.name).join(' | '));
 }
 
 main();
