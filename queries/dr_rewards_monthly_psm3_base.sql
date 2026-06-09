@@ -1,36 +1,51 @@
--- #############################################################################
--- ## !!! DOES NOT RUN !!! This query ALWAYS hits Dune's 30-minute execution  ##
--- ## limit and never returns a result. Base has by far the most L2 sUSDS     ##
--- ## Transfer activity of the four PSM3 chains, and even isolated to one      ##
--- ## chain the full-history per-user TWA reconstruction exceeds the timeout.  ##
--- ##                                                                          ##
--- ## CONSEQUENCE: it is DISABLED in src/scripts/combine-dr-results.ts, so     ##
--- ## Base L2 sUSDS DR revenue is currently MISSING from the combined rollup.  ##
--- ##                                                                          ##
--- ## TO FIX: split this further (e.g. by year via the {{end_date}} window, or ##
--- ## by quarter) and union the partial results client-side, or pre-materialize##
--- ## the TWA on a paid plan. Re-enable in combine-dr-results.ts once it runs. ##
--- #############################################################################
 -- =============================================================================
--- DR revenue (MONTHLY) — L2 sUSDS via PSM3, Base only
+-- DR revenue (MONTHLY) — L2 sUSDS via PSM3, Base only — WINDOWED
 -- -----------------------------------------------------------------------------
--- Split from dr_rewards_monthly_psm3.sql (query_7646378) which timed out when
--- covering all 4 L2 chains in a single execution. Each chain runs as a separate
--- query so the per-query data volume fits within Dune's execution limit
--- (except Base — see the warning above).
+-- Base has by far the most L2 sUSDS Transfer activity of the four PSM3 chains.
+-- Reconstructing the full-history per-user daily TWA in a single execution
+-- always blew past Dune's 30-minute limit (even on the `large` engine and even
+-- isolated to Base). This version is WINDOWED so each run only materializes the
+-- expensive per-(user, day) calendar for one [start_date, end_date) slice.
+--
+-- HOW THE SPLIT STAYS CORRECT (balances are path-dependent):
+--   * `opening_balance` + `opening_ref` seed every user with their balance +
+--     last ref_code as of start_date, computed from `prior_transfers` (all
+--     transfers STRICTLY BEFORE the window, attributed exactly as the in-window
+--     stream is). These are injected as a single synthetic event (block -1) at
+--     start_date 00:00 in `raw_transfers`, so the in-window running balance
+--     starts from the right place — a user who held sUSDS before the window
+--     still accrues.
+--   * The idle-day fill is CAPPED at (end_date - 1 day) so a window never bleeds
+--     into the next one. For the final/most-recent window, end_date is today (or
+--     later), so the cap naturally becomes current_date and ongoing holders keep
+--     accruing on idle days, exactly as the un-windowed query did.
+--   * Windows are disjoint in [start_date, end_date) and MUST align to month
+--     boundaries (quarters do) so the monthly output grain is never split across
+--     two windows, and the per-window results union cleanly with no overlap.
 --
 -- Grain: (month, blockchain, token, ref_code).
 -- Untagged sUSDS -> 99 (mirrors query_5310067).
--- PERF: idle-day fill is capped at last-tx-day for users with ~0 final balance.
 --
--- SAVED AS: query_7647196  (https://dune.com/queries/7647196)
+-- PARAMS:  {{start_date}}  inclusive window start (default 2024-09-01 = genesis)
+--          {{end_date}}    exclusive window end
+--
+-- DEPLOYED AS: a set of public quarterly windows with dates baked in, query IDs
+-- 7684981–7684988 (one per calendar quarter from 2024-09; see queries/README.md
+-- for the window→URL table). Their union reproduces the full coverage of the
+-- original query_7647196, which holds the un-windowed SQL that always times out
+-- (owned by a different account). This file is the parameterized template each
+-- window is generated from.
 -- =============================================================================
 with
     psm3_addr  as (select 0x1601843c5E9bC251A3272907010AFa41Fa18347E as addr),
     token_addr as (select 0x5875eEE11Cf8398102FdAd704C9E96607675467a as addr),
 
+    -- All referral attributions from genesis up to the window end. We need the
+    -- full prefix (not just the window) so a user's ref_code can be carried into
+    -- the window from an earlier referral. The swap table is small, so this scan
+    -- is cheap relative to the daily TWA expansion.
     raw_referral_events as (
-        select s.evt_block_number, s.evt_tx_hash, s.evt_index,
+        select s.evt_block_number, s.evt_block_time, s.evt_tx_hash, s.evt_index,
                s.receiver as user_addr,
                cast(s.referralCode as bigint) as ref_code
         from spark_protocol_base.psm3_evt_swap s
@@ -56,7 +71,68 @@ with
         where rn = 1
     ),
 
-    raw_transfers as (
+    -- Signed sUSDS balance deltas STRICTLY BEFORE the window, attributed exactly
+    -- as the in-window stream is (ref_code from latest_referral_per_tx on the
+    -- transfer's tx_hash + user). Used only to seed opening balance + ref; the
+    -- per-day reconstruction itself uses window_transfers below.
+    prior_transfers as (
+        select tr.evt_block_number, tr.evt_index,
+               tr."to" as user_addr,
+               cast(tr.value as double) / 1e18 as amount_change,
+               lr.ref_code
+        from erc20_base.evt_Transfer tr
+        cross join token_addr ta
+        left join latest_referral_per_tx lr
+            on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
+        where tr.contract_address = ta.addr
+          and date(tr.evt_block_time) >= date '2024-09-01'
+          and tr.evt_block_time < timestamp '{{start_date}}'
+          and tr."to" != 0x0000000000000000000000000000000000000000
+        union all
+        select tr.evt_block_number, tr.evt_index,
+               tr."from",
+               -cast(tr.value as double) / 1e18,
+               lr.ref_code
+        from erc20_base.evt_Transfer tr
+        cross join token_addr ta
+        left join latest_referral_per_tx lr
+            on tr.evt_tx_hash = lr.evt_tx_hash and tr."from" = lr.user_addr
+        where tr.contract_address = ta.addr
+          and date(tr.evt_block_time) >= date '2024-09-01'
+          and tr.evt_block_time < timestamp '{{start_date}}'
+          and tr."from" != 0x0000000000000000000000000000000000000000
+    ),
+
+    -- Per-user opening balance as of start_date (sum of every prior delta).
+    opening_balance as (
+        select user_addr, sum(amount_change) as bal
+        from prior_transfers
+        group by user_addr
+    ),
+
+    -- Per-user ref_code carried into the window: the LAST non-null ref_code among
+    -- the user's prior transfers, ordered by (block, index). This is exactly the
+    -- value the un-windowed query's `last_value(ref_code) ignore nulls over
+    -- running_balances` would hold entering start_date — derived from the same
+    -- transfer+latest_referral_per_tx attribution, NOT from raw swap events
+    -- (a swap only carries a ref into balance via a matching same-tx transfer).
+    -- NULL if the user had no ref-bearing transfer before the window, so an
+    -- in-window referral can still set it (untagged -> -999999 -> 99).
+    opening_ref as (
+        select user_addr, ref_code
+        from (
+            select user_addr, ref_code,
+                   row_number() over (
+                       partition by user_addr
+                       order by evt_block_number desc, evt_index desc
+                   ) as rn
+            from prior_transfers
+            where ref_code is not null
+        ) t
+        where rn = 1
+    ),
+
+    window_transfers as (
         -- incoming
         select tr.evt_block_time as ts, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
                tr."to" as user_addr,
@@ -67,7 +143,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
         where tr.contract_address = ta.addr
-          and date(tr.evt_block_time) >= date '2024-09-01'
+          and tr.evt_block_time >= timestamp '{{start_date}}'
           and tr.evt_block_time < timestamp '{{end_date}}'
           and tr."to" != 0x0000000000000000000000000000000000000000
         union all
@@ -81,9 +157,36 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."from" = lr.user_addr
         where tr.contract_address = ta.addr
-          and date(tr.evt_block_time) >= date '2024-09-01'
+          and tr.evt_block_time >= timestamp '{{start_date}}'
           and tr.evt_block_time < timestamp '{{end_date}}'
           and tr."from" != 0x0000000000000000000000000000000000000000
+    ),
+
+    -- Synthetic opening event (block -1 so it sorts before every real event of
+    -- the window) carrying the seeded balance + ref_code at start_date 00:00.
+    -- Emitted for every user with a non-zero opening balance OR any in-window
+    -- activity, so idle holders that entered the window with a balance are kept.
+    raw_transfers as (
+        select ts, evt_block_number, evt_tx_hash, evt_index, user_addr, amount_change, ref_code
+        from window_transfers
+        union all
+        select timestamp '{{start_date}}' as ts,
+               -1 as evt_block_number,
+               from_hex('0000000000000000000000000000000000000000000000000000000000000000') as evt_tx_hash,
+               -1 as evt_index,
+               u.user_addr,
+               coalesce(ob.bal, 0) as amount_change,
+               oref.ref_code
+        from (
+            select user_addr from window_transfers
+            union
+            -- > 1e-9: skip sub-dust opening balances (consistent with the
+            -- original's own 1e-9 idle-fill cutoff). Negligible vs the > 0 the
+            -- original technically counts; far below the 1e-6 xcheck tolerance.
+            select user_addr from opening_balance where bal > 1e-9
+        ) u
+        left join opening_balance ob   on u.user_addr = ob.user_addr
+        left join opening_ref      oref on u.user_addr = oref.user_addr
     ),
 
     running_balances as (
@@ -127,7 +230,14 @@ with
         select s.user_addr, s.dt, cast(s.dt as timestamp), 0,
                from_hex('0000000000000000000000000000000000000000000000000000000000000000'),
                -1, s.start_of_day_balance, coalesce(s.start_of_day_ref_code, -999999)
-        from daily_start_balances s where s.start_of_day_balance is not null
+        from daily_start_balances s
+        -- Skip the start-of-day fill ON the window's first day: the synthetic
+        -- opening event (block -1, see raw_transfers) already sits at start_date
+        -- 00:00 with the seeded balance. Emitting the lag-based fill here too
+        -- would inject a SECOND 00:00 event whose lag is 0 (no prior in-window
+        -- day); with its full-day duration it would zero out the seed day's TWA.
+        where s.start_of_day_balance is not null
+          and s.dt > cast('{{start_date}}' as date)
     ),
 
     event_durations as (
@@ -156,10 +266,19 @@ with
         ) t where rn = 1
     ),
 
+    -- Idle-fill is capped at the window end (end_date - 1 day). For a holder
+    -- whose balance is still positive at the window end this keeps them filled to
+    -- the last day of the window; for the final window (end_date >= today) the
+    -- cap becomes current_date, matching the un-windowed behaviour.
     user_date_ranges as (
         select deb.user_addr,
                min(deb.dt) as first_dt,
-               case when ufb.final_balance > 1e-9 then greatest(max(deb.dt), current_date) else max(deb.dt) end as last_dt
+               least(
+                   case when ufb.final_balance > 1e-9 then greatest(max(deb.dt), current_date) else max(deb.dt) end,
+                   -- cast (not `date '...'`) so a datetime-formatted param value
+                   -- ("YYYY-MM-DD 00:00:00" from Dune's UI) is still accepted.
+                   cast('{{end_date}}' as date) - interval '1' day
+               ) as last_dt
         from daily_end_balances deb
         join user_final_balance ufb on deb.user_addr = ufb.user_addr
         group by deb.user_addr, ufb.final_balance

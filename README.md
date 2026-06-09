@@ -54,7 +54,7 @@ foundational + helper queries it needs, so those never need to be run on their o
 | File | Dune ID |
 |---|---|
 | `dr_rewards_monthly_susds_susdc.sql` | [7646377](https://dune.com/queries/7646377) |
-| `dr_rewards_monthly_psm3_base.sql` | [7647196](https://dune.com/queries/7647196) — DOES NOT RUN (times out); disabled in combine |
+| `dr_rewards_monthly_psm3_base.sql` | windowed set [7684981–7684988](#base-l2-susds-psm3--windowed-set) (one per quarter; supersedes timed-out 7647196) |
 | `dr_rewards_monthly_psm3_arbitrum.sql` | [7647197](https://dune.com/queries/7647197) |
 | `dr_rewards_monthly_psm3_optimism.sql` | [7647198](https://dune.com/queries/7647198) |
 | `dr_rewards_monthly_psm3_unichain.sql` | [7647199](https://dune.com/queries/7647199) |
@@ -93,14 +93,30 @@ which reproduces `query_6398769` + `query_6619793` with no dependency on any
 opaque Spark dataset. All tokens (sUSDS, sUSDC, stUSDS, USDS farms, sp\*) are
 now fully transparent end-to-end.
 
-## Known gap: Base L2 sUSDS (PSM3) is missing
+## Base L2 sUSDS (PSM3) — windowed set
 
-`dr_rewards_monthly_psm3_base.sql` (7647196) **always hits Dune's 30-minute
-execution limit** and never returns a result, so it is **disabled** in
-`combine-dr-results.ts`. Base L2 sUSDS DR revenue is therefore **undercounted**
-in the combined rollup. The other three PSM3 chains (Arbitrum/Optimism/Unichain)
-run fine. To fix, split Base further (by year/quarter via `{{end_date}}`) and
-union client-side, or pre-materialize on a paid plan.
+The original `dr_rewards_monthly_psm3_base.sql` (query 7647196) **always hit
+Dune's 30-minute execution limit** because the full-history per-user daily TWA
+was too large for one execution. It is replaced by a **set of public, windowed
+Dune queries** — one per calendar quarter — whose union reproduces the original's
+full coverage. Each quarter only materializes one `[start, end)` slice and runs
+on the `large` engine in ~1–15 min (see the SQL file header for why the split
+stays equivalent to the un-windowed logic). `queries/dr_rewards_monthly_psm3_base.sql`
+is the parameterized template each window is baked from.
+
+| Quarter | Dune query |
+|---|---|
+| 2024-09-01 → 2024-12-01 | [7684981](https://dune.com/queries/7684981) |
+| 2024-12-01 → 2025-03-01 | [7684982](https://dune.com/queries/7684982) |
+| 2025-03-01 → 2025-06-01 | [7684983](https://dune.com/queries/7684983) |
+| 2025-06-01 → 2025-09-01 | [7684984](https://dune.com/queries/7684984) |
+| 2025-09-01 → 2025-12-01 | [7684985](https://dune.com/queries/7684985) |
+| 2025-12-01 → 2026-03-01 | [7684986](https://dune.com/queries/7684986) |
+| 2026-03-01 → 2026-06-01 | [7684987](https://dune.com/queries/7684987) |
+| 2026-06-01 → 2026-07-01 | [7684988](https://dune.com/queries/7684988) |
+
+Remaining step: re-enable Base in `combine-dr-results.ts` by reading + unioning
+these eight query results (the timed-out 7647196 is still commented out there).
 
 ---
 
