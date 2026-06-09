@@ -40,7 +40,7 @@ const SOURCES: { source: string; id: number }[] = [
   { source: 'psm3_unichain',  id: 7647199 },
   { source: 'stusds',         id: 7646379 },
   { source: 'farms',          id: 7646380 },
-  { source: 'sp',             id: 7646382 },
+  { source: 'sp',             id: 7683760 },
 ];
 
 const OUT_DIR = path.resolve('dune-results');

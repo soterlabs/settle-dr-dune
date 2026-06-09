@@ -60,7 +60,7 @@ foundational + helper queries it needs, so those never need to be run on their o
 | `dr_rewards_monthly_psm3_unichain.sql` | [7647199](https://dune.com/queries/7647199) |
 | `dr_rewards_monthly_stusds.sql` | [7646379](https://dune.com/queries/7646379) |
 | `dr_rewards_monthly_farms.sql` | [7646380](https://dune.com/queries/7646380) |
-| `dr_rewards_monthly_sp.sql` | [7646382](https://dune.com/queries/7646382) |
+| `dr_rewards_monthly_sp.sql` | [7683760](https://dune.com/queries/7683760) |
 
 Referenced (do **not** run directly): foundational `twa_*` = 7640317–7640321;
 helpers `rates_dr`/`conversion_*` = 7640322–7640325. See `queries/README.md` for
@@ -85,13 +85,13 @@ single query combining all five sources exceeds Dune's stage limit (see
 
 ---
 
-## Known gap: sp* deployment ratio
+## sp* deployment ratio
 
-`dr_rewards_monthly_sp.sql` hardcodes `sp_deployment_ratio = 0.5` — this is
-**deliberately wrong** to make sp* revenue figures obviously incorrect.
-Spark's real value is a per-day TWA computed from an opaque internal dataset
-(`query_6398769`); Amatsu used a flat `0.9`. Neither is reproduced here yet.
-All other tokens (sUSDS, sUSDC, stUSDS, USDS farms) are fully transparent.
+`dr_rewards_monthly_sp.sql` uses a per-day deployment ratio from the
+self-owned `deployment_ratio_sp.sql` ([query 7683727](https://dune.com/queries/7683727)),
+which reproduces `query_6398769` + `query_6619793` with no dependency on any
+opaque Spark dataset. All tokens (sUSDS, sUSDC, stUSDS, USDS farms, sp\*) are
+now fully transparent end-to-end.
 
 ## Known gap: Base L2 sUSDS (PSM3) is missing
 

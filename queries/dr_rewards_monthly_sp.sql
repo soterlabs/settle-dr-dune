@@ -6,22 +6,19 @@
 --
 -- Grain: (month, blockchain, token, ref_code).
 --
--- !!!!!!!!!!!!!!!!!!!!!!!!!!  UNRESOLVED PLACEHOLDER  !!!!!!!!!!!!!!!!!!!!!!!!!!!!
--- sp* DEPLOYMENT RATIO is HARDCODED to 0.5 and is *deliberately wrong* so sp*
--- numbers stick out and cannot be shipped silently. Spark applies a per-day TWA
--- deployment ratio (vault_deployed / vault_total) from an OPAQUE dataset
--- (query_6398769); Amatsu used a flat 0.9. REPLACE before trusting sp* revenue.
--- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
---
--- Pipeline: TWA balance (query_7640321) x deployment ratio x reward rate
--- (query_7640322, XR*) x sp* share->USD value (query_7640325, by dt/token/chain).
+-- Pipeline: TWA balance (query_7640321) x per-day deployment ratio
+-- (query_7683727, deployment_ratio_sp.sql) x reward rate (query_7640322, XR*)
+-- x sp* share->USD value (query_7640325, by dt/token/chain).
 -- spETH is tracked but earns ZERO rewards (zeroed here). Untagged keeps -999999.
 --
--- SAVED AS: query_7646382  (https://dune.com/queries/7646382)
+-- SAVED AS: query_7683760  (https://dune.com/queries/7683760)
 -- =============================================================================
 with
-    params (sp_deployment_ratio) as (
-        values (cast(0.5 as double))   -- TODO: replace 0.5 with the real per-day ratio
+    -- Per-day deployment ratio: (vault_deployed / vault_total) per (blockchain, vault_symbol, dt).
+    -- Source: deployment_ratio_sp.sql (query_7683727).
+    deployment_ratios as (
+        select blockchain, vault_symbol, dt, deployment_ratio
+        from query_7683727
     ),
 
     balances as (
@@ -40,13 +37,16 @@ with
             b.dt, b.blockchain, b.token, b.ref_code, b.amount,
             case
                 when b.token = 'spETH' then 0.0   -- spETH earns zero DR
-                else b.amount * p.sp_deployment_ratio / 365.0 * r.reward_per
+                else b.amount * coalesce(dr.deployment_ratio, 0) / 365.0 * r.reward_per
             end as tw_reward
         from balances b
-        cross join params p
+        left join deployment_ratios dr
+            on b.dt          = dr.dt
+           and b.blockchain   = dr.blockchain
+           and b.token        = dr.vault_symbol
         join query_7640322 r
             on r.reward_code = 'XR*'
-            and b.dt between r.start_dt and r.end_dt
+           and b.dt between r.start_dt and r.end_dt
     ),
 
     daily_usd as (

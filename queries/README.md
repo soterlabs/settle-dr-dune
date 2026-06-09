@@ -50,6 +50,7 @@ The five `twa_*.sql` queries above are Layer 0/1 (per-user daily TWA **balance**
 | [`conversion_susds.sql`](conversion_susds.sql) | 3b | sUSDS share→USDS daily rate (also used for sUSDC) | `query_5752873` |
 | [`conversion_stusds.sql`](conversion_stusds.sql) | 3b | stUSDS share→USDS daily rate | `query_5449435` |
 | [`conversion_sp_vaults.sql`](conversion_sp_vaults.sql) | 3b | sp\* share→USD (spETH × WETH price) | `query_5357785` |
+| [`deployment_ratio_sp.sql`](deployment_ratio_sp.sql) | 3b | sp\* vault deployment ratio `(deployed/total)` per day | `query_6398769` + `query_6619793` |
 | [`dr_rewards_monthly_susds_susdc.sql`](dr_rewards_monthly_susds_susdc.sql) | 2+3 | sUSDS/sUSDC → monthly `dr_usd` | `xr-ar-rewards-daily-raw.txt` |
 | [`dr_rewards_monthly_psm3_base.sql`](dr_rewards_monthly_psm3_base.sql) | 2+3 | L2 sUSDS (PSM3, Base) → monthly `dr_usd` — **always times out; disabled in combine** | " |
 | [`dr_rewards_monthly_psm3_arbitrum.sql`](dr_rewards_monthly_psm3_arbitrum.sql) | 2+3 | L2 sUSDS (PSM3, Arbitrum) → monthly `dr_usd` | " |
@@ -82,7 +83,7 @@ five small outputs **client-side** via
 
 ### Known placeholders / not-yet-implemented
 
-- **sp\* deployment ratio is hardcoded to `0.5` in `dr_rewards_monthly_sp.sql` and is deliberately wrong.** Spark applies a per-day TWA deployment ratio (`vault_deployed / vault_total`) sourced from an *opaque* dataset (`result_spark_savings_v_2_vaults_time_weighted_average_holdings`, via `query_6398769`); Amatsu uses a flat `0.9`. We use `0.5` on purpose so sp\* numbers (spUSDC/spUSDT/spPYUSD/spETH) are obviously off and this gap cannot be shipped silently. **Replace before trusting any sp\* revenue.** Everything else (sUSDS, sUSDC, stUSDS, USDS farms) is fully transparent end-to-end.
+- **sp\* deployment ratio** is now computed per-day from self-owned sources in `deployment_ratio_sp.sql` ([query 7683727](https://dune.com/queries/7683727)). No remaining placeholders — `dr_rewards_monthly_sp.sql` references it directly. Everything is now fully transparent end-to-end.
 
 ### Wiring (saved Dune query IDs)
 
@@ -102,6 +103,7 @@ The monthly queries reference the foundational + helper queries by Dune query ID
 | `conversion_susds.sql` | [7640323](https://dune.com/queries/7640323) |
 | `conversion_stusds.sql` | [7640324](https://dune.com/queries/7640324) |
 | `conversion_sp_vaults.sql` | [7640325](https://dune.com/queries/7640325) |
+| `deployment_ratio_sp.sql` | [7683727](https://dune.com/queries/7683727) |
 
 **Monthly revenue (Layer 2+3) — these are the ones you RUN:**
 
@@ -114,7 +116,7 @@ The monthly queries reference the foundational + helper queries by Dune query ID
 | `dr_rewards_monthly_psm3_unichain.sql` | [7647199](https://dune.com/queries/7647199) | inline + 7640322, 7640323 |
 | `dr_rewards_monthly_stusds.sql` | [7646379](https://dune.com/queries/7646379) | 7640319, 7640322, 7640324 |
 | `dr_rewards_monthly_farms.sql` | [7646380](https://dune.com/queries/7646380) | 7640320, 7640322 |
-| `dr_rewards_monthly_sp.sql` | [7646382](https://dune.com/queries/7646382) | 7640321, 7640322, 7640325 |
+| `dr_rewards_monthly_sp.sql` | [7683760](https://dune.com/queries/7683760) | 7640321, 7640322, 7640325, 7683727 |
 
 The cross-asset per-`ref_code` rollup is produced by
 [`src/scripts/combine-dr-results.ts`](../src/scripts/combine-dr-results.ts), which
