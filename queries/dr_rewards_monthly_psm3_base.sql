@@ -21,8 +21,7 @@
 --     accruing on idle days, exactly as the un-windowed query did.
 --   * Windows are disjoint in [start_date, end_date) and MUST align to month
 --     boundaries (quarters do) so the monthly output grain is never split across
---     two windows. Union the per-window results client-side — see
---     src/scripts/run-psm3-base-windows.ts.
+--     two windows, and the per-window results union cleanly with no overlap.
 --
 -- Grain: (month, blockchain, token, ref_code).
 -- Untagged sUSDS -> 99 (mirrors query_5310067).
