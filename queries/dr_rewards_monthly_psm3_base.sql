@@ -30,9 +30,12 @@
 -- PARAMS:  {{start_date}}  inclusive window start (default 2024-09-01 = genesis)
 --          {{end_date}}    exclusive window end
 --
--- SAVED AS: query_7684915  (https://dune.com/queries/7684915)
--- Windowed rewrite of the original query_7647196 (which holds the un-windowed
--- SQL that always times out and is owned by a different account).
+-- DEPLOYED AS: a set of public quarterly windows with dates baked in, query IDs
+-- 7684981–7684988 (one per calendar quarter from 2024-09; see queries/README.md
+-- for the window→URL table). Their union reproduces the full coverage of the
+-- original query_7647196, which holds the un-windowed SQL that always times out
+-- (owned by a different account). This file is the parameterized template each
+-- window is generated from.
 -- =============================================================================
 with
     psm3_addr  as (select 0x1601843c5E9bC251A3272907010AFa41Fa18347E as addr),
