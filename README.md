@@ -115,8 +115,9 @@ is the parameterized template each window is baked from.
 | 2026-03-01 → 2026-06-01 | [7684987](https://dune.com/queries/7684987) |
 | 2026-06-01 → 2026-07-01 | [7684988](https://dune.com/queries/7684988) |
 
-Remaining step: re-enable Base in `combine-dr-results.ts` by reading + unioning
-these eight query results (the timed-out 7647196 is still commented out there).
+All eight windows are wired into `combine-dr-results.ts` as `psm3_base` sources.
+Re-run only the affected quarter(s) on Dune when fresh data is needed; the
+combine script fetches stored results for free.
 
 ---
 

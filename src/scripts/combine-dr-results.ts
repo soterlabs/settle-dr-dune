@@ -1,19 +1,22 @@
 /**
- * Combines the five per-source MONTHLY DR-revenue queries into the cross-asset
+ * Combines the per-source MONTHLY DR-revenue queries into the cross-asset
  * rollups that cannot be produced in a single Dune query (combining all five
  * sources re-inlines all five foundational queries and hits Dune's stage limit).
  *
- * It fetches the LATEST stored result of each monthly query (no re-execution,
- * so it is essentially free) and writes three CSVs to dune-results/. All are
- * pivoted WIDE: one column per YYYY-MM month + a total_dr_usd column, rows
- * sorted by ref_code ascending (empty cell = no activity that month):
- *   - dr_monthly_by_refcode.csv       ref_code,            <months...>, total
- *   - dr_monthly_by_refcode_token.csv ref_code, token,     <months...>, total
- *   - dr_monthly_combined.csv         ref_code, token, blockchain, source, <months...>, total
+ * All sources fetch the LATEST stored result (no re-execution, essentially
+ * free). Run each monthly query on Dune first when you want fresh data, then
+ * run this script to combine.
  *
- * Run the five monthly queries on Dune first (so they have a fresh result),
- * then:
+ * Base PSM3 uses 8 windowed quarterly queries (one per calendar quarter) whose
+ * union reproduces the original full-history query. Each window only
+ * materialises one [start, end) slice and runs in 1–15 min on the large engine.
+ *
  *   $env:DUNE_API_KEY="..."; npx tsx src/scripts/combine-dr-results.ts
+ *
+ * Writes three CSVs to dune-results/, pivoted WIDE (one column per YYYY-MM):
+ *   - dr_monthly_by_refcode.csv
+ *   - dr_monthly_by_refcode_token.csv
+ *   - dr_monthly_combined.csv
  */
 import 'dotenv/config';
 import * as fs from 'fs';
@@ -24,23 +27,27 @@ const KEY = process.env.DUNE_API_KEY;
 if (!KEY) { console.error('Set DUNE_API_KEY.'); process.exit(1); }
 const H = { 'x-dune-api-key': KEY };
 
+// All sources: fetch latest stored result — no re-execution, essentially free.
+// Base PSM3 is covered by 8 non-overlapping quarterly windows whose union gives
+// full-history coverage (original single query 7647196 always timed out).
+// Re-run a window on Dune whenever its quarter needs refreshing.
 const SOURCES: { source: string; id: number }[] = [
-  { source: 'susds_susdc',    id: 7646377 },
-  // psm3 (7646378) retired — timed out on 4-chain combined scan; split by chain:
-  // ###########################################################################
-  // ## !! DISABLED !! psm3_base (7647196) ALWAYS HITS DUNE'S 30-MIN EXECUTION ##
-  // ## LIMIT and never returns a result, so its rewards are MISSING from the  ##
-  // ## combined output below. Base L2 sUSDS DR revenue is therefore UNDER-    ##
-  // ## COUNTED until this query is made to run (e.g. split by year). Re-enable ##
-  // ## the line once 7647196 produces a result.                               ##
-  // ###########################################################################
-  // { source: 'psm3_base',      id: 7647196 },
-  { source: 'psm3_arbitrum',  id: 7647197 },
-  { source: 'psm3_optimism',  id: 7647198 },
-  { source: 'psm3_unichain',  id: 7647199 },
-  { source: 'stusds',         id: 7646379 },
-  { source: 'farms',          id: 7646380 },
-  { source: 'sp',             id: 7683760 },
+  { source: 'susds_susdc',   id: 7646377 },
+  // psm3_base — 8 quarterly windows, union = full history
+  { source: 'psm3_base',     id: 7684981 }, // 2024-09-01 → 2024-12-01
+  { source: 'psm3_base',     id: 7684982 }, // 2024-12-01 → 2025-03-01
+  { source: 'psm3_base',     id: 7684983 }, // 2025-03-01 → 2025-06-01
+  { source: 'psm3_base',     id: 7684984 }, // 2025-06-01 → 2025-09-01
+  { source: 'psm3_base',     id: 7684985 }, // 2025-09-01 → 2025-12-01
+  { source: 'psm3_base',     id: 7684986 }, // 2025-12-01 → 2026-03-01
+  { source: 'psm3_base',     id: 7684987 }, // 2026-03-01 → 2026-06-01
+  { source: 'psm3_base',     id: 7684988 }, // 2026-06-01 → 2026-07-01
+  { source: 'psm3_arbitrum', id: 7647197 },
+  { source: 'psm3_optimism', id: 7647198 },
+  { source: 'psm3_unichain', id: 7647199 },
+  { source: 'stusds',        id: 7646379 },
+  { source: 'farms',         id: 7646380 },
+  { source: 'sp',            id: 7683760 },
 ];
 
 const OUT_DIR = path.resolve('dune-results');
@@ -92,6 +99,8 @@ async function main() {
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
 
   const all: (MonthlyRow & { source: string })[] = [];
+
+  // Fetch latest stored result for every source (free — no re-execution).
   for (const { source, id } of SOURCES) {
     process.stdout.write(`Fetching ${source} (query_${id})... `);
     const rows = await fetchLatestRows(id);
