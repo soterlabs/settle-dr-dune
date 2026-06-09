@@ -54,7 +54,7 @@ foundational + helper queries it needs, so those never need to be run on their o
 | File | Dune ID |
 |---|---|
 | `dr_rewards_monthly_susds_susdc.sql` | [7646377](https://dune.com/queries/7646377) |
-| `dr_rewards_monthly_psm3_base.sql` | [7647196](https://dune.com/queries/7647196) — DOES NOT RUN (times out); disabled in combine |
+| `dr_rewards_monthly_psm3_base.sql` | [7647196](https://dune.com/queries/7647196) — windowed; run per-quarter via `run-psm3-base-windows.ts` |
 | `dr_rewards_monthly_psm3_arbitrum.sql` | [7647197](https://dune.com/queries/7647197) |
 | `dr_rewards_monthly_psm3_optimism.sql` | [7647198](https://dune.com/queries/7647198) |
 | `dr_rewards_monthly_psm3_unichain.sql` | [7647199](https://dune.com/queries/7647199) |
@@ -93,14 +93,25 @@ Spark's real value is a per-day TWA computed from an opaque internal dataset
 (`query_6398769`); Amatsu used a flat `0.9`. Neither is reproduced here yet.
 All other tokens (sUSDS, sUSDC, stUSDS, USDS farms) are fully transparent.
 
-## Known gap: Base L2 sUSDS (PSM3) is missing
+## Base L2 sUSDS (PSM3) — now windowed (was: times out)
 
-`dr_rewards_monthly_psm3_base.sql` (7647196) **always hits Dune's 30-minute
-execution limit** and never returns a result, so it is **disabled** in
-`combine-dr-results.ts`. Base L2 sUSDS DR revenue is therefore **undercounted**
-in the combined rollup. The other three PSM3 chains (Arbitrum/Optimism/Unichain)
-run fine. To fix, split Base further (by year/quarter via `{{end_date}}`) and
-union client-side, or pre-materialize on a paid plan.
+`dr_rewards_monthly_psm3_base.sql` (7647196) used to **always hit Dune's
+30-minute execution limit** because the full-history per-user daily TWA was too
+large for one execution. It is now **windowed**: it takes a `{{start_date}}` /
+`{{end_date}}` pair and only materializes one calendar-quarter slice per run,
+seeding each window with per-user opening balances + ref_codes (see the SQL
+header for why the split stays correct). Each quarter runs on the `large` engine
+in ~5–15 min (heaviest recent quarter: ~15 min).
+
+Run all quarters and union them client-side:
+
+```bash
+DUNE_API_KEY=<large-capable key> npx tsx src/scripts/run-psm3-base-windows.ts
+# writes dune-results/dr_rewards_monthly_psm3_base.csv
+```
+
+Remaining step: re-enable Base in `combine-dr-results.ts` (read it from that CSV
+— the saved Dune query 7647196 only holds one window's result at a time).
 
 ---
 

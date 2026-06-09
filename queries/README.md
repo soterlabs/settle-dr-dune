@@ -51,7 +51,7 @@ The five `twa_*.sql` queries above are Layer 0/1 (per-user daily TWA **balance**
 | [`conversion_stusds.sql`](conversion_stusds.sql) | 3b | stUSDS share→USDS daily rate | `query_5449435` |
 | [`conversion_sp_vaults.sql`](conversion_sp_vaults.sql) | 3b | sp\* share→USD (spETH × WETH price) | `query_5357785` |
 | [`dr_rewards_monthly_susds_susdc.sql`](dr_rewards_monthly_susds_susdc.sql) | 2+3 | sUSDS/sUSDC → monthly `dr_usd` | `xr-ar-rewards-daily-raw.txt` |
-| [`dr_rewards_monthly_psm3_base.sql`](dr_rewards_monthly_psm3_base.sql) | 2+3 | L2 sUSDS (PSM3, Base) → monthly `dr_usd` — **always times out; disabled in combine** | " |
+| [`dr_rewards_monthly_psm3_base.sql`](dr_rewards_monthly_psm3_base.sql) | 2+3 | L2 sUSDS (PSM3, Base) → monthly `dr_usd` — **windowed** (`{{start_date}}`/`{{end_date}}`); run per-quarter via `run-psm3-base-windows.ts` | " |
 | [`dr_rewards_monthly_psm3_arbitrum.sql`](dr_rewards_monthly_psm3_arbitrum.sql) | 2+3 | L2 sUSDS (PSM3, Arbitrum) → monthly `dr_usd` | " |
 | [`dr_rewards_monthly_psm3_optimism.sql`](dr_rewards_monthly_psm3_optimism.sql) | 2+3 | L2 sUSDS (PSM3, Optimism) → monthly `dr_usd` | " |
 | [`dr_rewards_monthly_psm3_unichain.sql`](dr_rewards_monthly_psm3_unichain.sql) | 2+3 | L2 sUSDS (PSM3, Unichain) → monthly `dr_usd` | " |
@@ -108,7 +108,7 @@ The monthly queries reference the foundational + helper queries by Dune query ID
 | File | Saved Dune query ID | References |
 |---|---|---|
 | `dr_rewards_monthly_susds_susdc.sql` | [7646377](https://dune.com/queries/7646377) | 7640317, 7640322, 7640323 |
-| `dr_rewards_monthly_psm3_base.sql` | [7647196](https://dune.com/queries/7647196) | **DOES NOT RUN — always times out (30 min). DISABLED in combine; Base L2 sUSDS revenue is missing.** inline + 7640322, 7640323 |
+| `dr_rewards_monthly_psm3_base.sql` | [7647196](https://dune.com/queries/7647196) | **Windowed** — takes `{{start_date}}`/`{{end_date}}`, run one quarter at a time (~5–15 min on `large`) via `run-psm3-base-windows.ts`, union client-side. inline + 7640322, 7640323 |
 | `dr_rewards_monthly_psm3_arbitrum.sql` | [7647197](https://dune.com/queries/7647197) | inline + 7640322, 7640323 |
 | `dr_rewards_monthly_psm3_optimism.sql` | [7647198](https://dune.com/queries/7647198) | inline + 7640322, 7640323 |
 | `dr_rewards_monthly_psm3_unichain.sql` | [7647199](https://dune.com/queries/7647199) | inline + 7640322, 7640323 |
