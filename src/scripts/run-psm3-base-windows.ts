@@ -23,7 +23,7 @@
  *
  * Writes dune-results/dr_rewards_monthly_psm3_base.csv on a full run. That CSV
  * is what combine-dr-results.ts should read for Base (the saved Dune query
- * 7647196 can only hold one window's result at a time).
+ * 7684915 can only hold one window's result at a time).
  */
 import 'dotenv/config';
 import * as fs from 'fs';
@@ -117,7 +117,9 @@ async function runWindow(rawSql: string, start: string, end: string): Promise<Mo
     }
     return rows;
   } finally {
-    await fetch(`${API}/query/${query_id}`, { method: 'DELETE', headers: H }).catch(() => {});
+    // Dune has NO delete endpoint; archive (POST) is the cleanup, and frees the
+    // private-query quota. A swallowed DELETE here used to silently leak queries.
+    await fetch(`${API}/query/${query_id}/archive`, { method: 'POST', headers: H }).catch(() => {});
   }
 }
 

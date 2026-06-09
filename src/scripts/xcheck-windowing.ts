@@ -104,7 +104,9 @@ async function run(label: string, sql: string): Promise<Row[]> {
     }
     return rows;
   } finally {
-    await fetch(`${API}/query/${query_id}`, { method: 'DELETE', headers: H }).catch(() => {});
+    // Dune has NO delete endpoint; archive (POST) is the cleanup, and frees the
+    // private-query quota. A swallowed DELETE here used to silently leak queries.
+    await fetch(`${API}/query/${query_id}/archive`, { method: 'POST', headers: H }).catch(() => {});
   }
 }
 

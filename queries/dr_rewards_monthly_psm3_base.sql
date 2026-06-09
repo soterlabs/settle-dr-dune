@@ -30,7 +30,9 @@
 -- PARAMS:  {{start_date}}  inclusive window start (default 2024-09-01 = genesis)
 --          {{end_date}}    exclusive window end
 --
--- SAVED AS: query_7647196  (https://dune.com/queries/7647196)
+-- SAVED AS: query_7684915  (https://dune.com/queries/7684915)
+-- Windowed rewrite of the original query_7647196 (which holds the un-windowed
+-- SQL that always times out and is owned by a different account).
 -- =============================================================================
 with
     psm3_addr  as (select 0x1601843c5E9bC251A3272907010AFa41Fa18347E as addr),
@@ -233,7 +235,7 @@ with
         -- would inject a SECOND 00:00 event whose lag is 0 (no prior in-window
         -- day); with its full-day duration it would zero out the seed day's TWA.
         where s.start_of_day_balance is not null
-          and s.dt > date '{{start_date}}'
+          and s.dt > cast('{{start_date}}' as date)
     ),
 
     event_durations as (
@@ -271,7 +273,9 @@ with
                min(deb.dt) as first_dt,
                least(
                    case when ufb.final_balance > 1e-9 then greatest(max(deb.dt), current_date) else max(deb.dt) end,
-                   date '{{end_date}}' - interval '1' day
+                   -- cast (not `date '...'`) so a datetime-formatted param value
+                   -- ("YYYY-MM-DD 00:00:00" from Dune's UI) is still accepted.
+                   cast('{{end_date}}' as date) - interval '1' day
                ) as last_dt
         from daily_end_balances deb
         join user_final_balance ufb on deb.user_addr = ufb.user_addr

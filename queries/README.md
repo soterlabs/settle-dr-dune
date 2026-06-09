@@ -108,7 +108,7 @@ The monthly queries reference the foundational + helper queries by Dune query ID
 | File | Saved Dune query ID | References |
 |---|---|---|
 | `dr_rewards_monthly_susds_susdc.sql` | [7646377](https://dune.com/queries/7646377) | 7640317, 7640322, 7640323 |
-| `dr_rewards_monthly_psm3_base.sql` | [7647196](https://dune.com/queries/7647196) | **Windowed** — takes `{{start_date}}`/`{{end_date}}`, run one quarter at a time (~5–15 min on `large`) via `run-psm3-base-windows.ts`, union client-side. inline + 7640322, 7640323 |
+| `dr_rewards_monthly_psm3_base.sql` | [7684915](https://dune.com/queries/7684915) | **Windowed** — takes `{{start_date}}`/`{{end_date}}`, run one quarter at a time (~5–15 min on `large`) via `run-psm3-base-windows.ts`, union client-side. Supersedes un-windowed 7647196. inline + 7640322, 7640323 |
 | `dr_rewards_monthly_psm3_arbitrum.sql` | [7647197](https://dune.com/queries/7647197) | inline + 7640322, 7640323 |
 | `dr_rewards_monthly_psm3_optimism.sql` | [7647198](https://dune.com/queries/7647198) | inline + 7640322, 7640323 |
 | `dr_rewards_monthly_psm3_unichain.sql` | [7647199](https://dune.com/queries/7647199) | inline + 7640322, 7640323 |

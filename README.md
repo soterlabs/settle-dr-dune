@@ -54,7 +54,7 @@ foundational + helper queries it needs, so those never need to be run on their o
 | File | Dune ID |
 |---|---|
 | `dr_rewards_monthly_susds_susdc.sql` | [7646377](https://dune.com/queries/7646377) |
-| `dr_rewards_monthly_psm3_base.sql` | [7647196](https://dune.com/queries/7647196) — windowed; run per-quarter via `run-psm3-base-windows.ts` |
+| `dr_rewards_monthly_psm3_base.sql` | [7684915](https://dune.com/queries/7684915) — windowed; run per-quarter via `run-psm3-base-windows.ts` (supersedes un-windowed 7647196) |
 | `dr_rewards_monthly_psm3_arbitrum.sql` | [7647197](https://dune.com/queries/7647197) |
 | `dr_rewards_monthly_psm3_optimism.sql` | [7647198](https://dune.com/queries/7647198) |
 | `dr_rewards_monthly_psm3_unichain.sql` | [7647199](https://dune.com/queries/7647199) |
@@ -95,13 +95,15 @@ All other tokens (sUSDS, sUSDC, stUSDS, USDS farms) are fully transparent.
 
 ## Base L2 sUSDS (PSM3) — now windowed (was: times out)
 
-`dr_rewards_monthly_psm3_base.sql` (7647196) used to **always hit Dune's
-30-minute execution limit** because the full-history per-user daily TWA was too
-large for one execution. It is now **windowed**: it takes a `{{start_date}}` /
-`{{end_date}}` pair and only materializes one calendar-quarter slice per run,
-seeding each window with per-user opening balances + ref_codes (see the SQL
-header for why the split stays correct). Each quarter runs on the `large` engine
-in ~5–15 min (heaviest recent quarter: ~15 min).
+The original `dr_rewards_monthly_psm3_base.sql` (query 7647196) **always hit
+Dune's 30-minute execution limit** because the full-history per-user daily TWA
+was too large for one execution. The repo SQL is now **windowed** and saved as a
+new query, [7684915](https://dune.com/queries/7684915) (7647196 is owned by a
+different account and still holds the old un-windowed SQL): it takes a
+`{{start_date}}` / `{{end_date}}` pair and only materializes one calendar-quarter
+slice per run, seeding each window with per-user opening balances + ref_codes
+(see the SQL header for why the split stays correct). Each quarter runs on the
+`large` engine in ~5–15 min (heaviest recent quarter: ~15 min).
 
 Run all quarters and union them client-side:
 
@@ -111,7 +113,7 @@ DUNE_API_KEY=<large-capable key> npx tsx src/scripts/run-psm3-base-windows.ts
 ```
 
 Remaining step: re-enable Base in `combine-dr-results.ts` (read it from that CSV
-— the saved Dune query 7647196 only holds one window's result at a time).
+— the saved Dune query 7684915 only holds one window's result at a time).
 
 ---
 
