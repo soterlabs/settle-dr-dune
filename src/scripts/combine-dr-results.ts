@@ -135,7 +135,22 @@ async function main() {
     return { header: [...keyHeaders, ...MONTHS, 'total_dr_usd'], rows };
   }
 
-  const byRefAsc = (a: (string | number)[], b: (string | number)[]) => Number(a[0]) - Number(b[0]);
+  // ref_codes whose DR is shown per-token rather than aggregated in the by_refcode rollup.
+  const SPLIT_BY_TOKEN_CODES = new Set([0, 1]);
+
+  // Sort that handles both plain numeric codes and compound labels like "0 (USDS-CLE)".
+  const numericBase = (v: string | number) => {
+    const m = String(v).match(/^(-?\d+)/);
+    return m ? Number(m[1]) : NaN;
+  };
+  const byRefAsc = (a: (string | number)[], b: (string | number)[]) => {
+    const na = numericBase(a[0]), nb = numericBase(b[0]);
+    if (Number.isFinite(na) && Number.isFinite(nb)) {
+      if (na !== nb) return na - nb;
+      return String(a[0]).localeCompare(String(b[0]));
+    }
+    return String(a[0]).localeCompare(String(b[0]));
+  };
   const byRefThenToken = (a: (string | number)[], b: (string | number)[]) =>
     Number(a[0]) - Number(b[0]) || String(a[1]).localeCompare(String(b[1]));
   const byRefTokenChainSource = (a: (string | number)[], b: (string | number)[]) =>
@@ -145,7 +160,13 @@ async function main() {
     String(a[3]).localeCompare(String(b[3]));
 
   // 1. Per ref_code (one line each), months across, total.
-  const p1 = pivot(['ref_code'], (r) => [r.ref_code], byRefAsc);
+  //    ref_codes 0 and 1 are split by token (compound label "0 (token)") so that
+  //    Chronicle / USDS-CLE is visibly separated from sUSDS, USDS-SKY, etc.
+  const p1 = pivot(
+    ['ref_code'],
+    (r) => [SPLIT_BY_TOKEN_CODES.has(r.ref_code) ? `${r.ref_code} (${r.token})` : r.ref_code],
+    byRefAsc,
+  );
   writeCsv(path.join(OUT_DIR, 'dr_monthly_by_refcode.csv'), p1.header, p1.rows);
 
   // 2. Per (ref_code, token): one line per token, tokens grouped under each ref_code.

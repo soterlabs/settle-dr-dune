@@ -55,12 +55,30 @@ const UNTAGGED_CODES = new Set([
 /** Note applied to ref_code 126 on every Diff tab. */
 const NOTE_126 = 'Subproxy holdings, no DR applied. Handled in Supply Side MSC.';
 
-/** Numeric ref_codes ascending, then non-numeric alphabetically. */
+/**
+ * Ref_codes that are split by token in our output (compound keys like "0 (sUSDS)").
+ * These are produced by combine-dr-results.ts and matched in Spark's data.
+ */
+const SPLIT_CODES = new Set(['0', '1']);
+
+/**
+ * Extract the leading integer from a plain or compound code ("0 (sUSDS)" → 0).
+ * Returns NaN for non-numeric strings like "untagged".
+ */
+function numericBase(code: string): number {
+  const m = code.match(/^(-?\d+)/);
+  return m ? Number(m[1]) : NaN;
+}
+
+/** Numeric ref_codes ascending (compound codes sort under their base), then non-numeric alphabetically. */
 function sortedCodes(codes: Iterable<string>): string[] {
   return [...codes].sort((a, b) => {
-    const na = Number(a), nb = Number(b);
+    const na = numericBase(a), nb = numericBase(b);
     const aNum = Number.isFinite(na), bNum = Number.isFinite(nb);
-    if (aNum && bNum) return na - nb;
+    if (aNum && bNum) {
+      if (na !== nb) return na - nb;
+      return a.localeCompare(b); // same base → "0 (sUSDS)" before "0 (USDS-SKY)"
+    }
     if (aNum) return -1;
     if (bNum) return 1;
     return a.localeCompare(b);
@@ -137,9 +155,10 @@ function buildDiffAoa(
   const makeRow = (code: string): (string | number)[] => {
     const has1 = d1.has(code), has2 = d2.has(code);
     const present = has1 && has2 ? 'both' : has1 ? `${label1} only` : `${label2} only`;
-    const notes = code === '126' ? NOTE_126
-                : code === '130' ? 'Found in Spark datasets only, no onchain events.'
-                : code === '0' || code === '1' ? 'Diff vs Spark = Chronicle farm (USDS-CLE) only. Spark does not track this farm.'
+    const notes = code === '126'          ? NOTE_126
+                : code === '130'          ? 'Found in Spark datasets only, no onchain events.'
+                : code === '0 (USDS-CLE)' || code === '1 (USDS-CLE)'
+                                          ? 'Chronicle farm — not tracked by Spark.'
                 : '';
     const m1 = d1.get(code) ?? new Map<string, number>();
     const m2 = d2.get(code) ?? new Map<string, number>();
@@ -199,7 +218,12 @@ function parseCsv(content: string): string[][] {
 // ─── loaders ──────────────────────────────────────────────────────────────────
 
 /**
- * Our pipeline output: wide CSV with header ref_code,YYYY-MM,…,total_dr_usd.
+ * Our pipeline output: wide CSV with header ref_code,token,YYYY-MM,…,total_dr_usd.
+ * Source: dr_monthly_by_refcode_token.csv (ref_code × token granularity).
+ *
+ * For ref_codes in SPLIT_CODES (0, 1) each token gets its own DataMap entry
+ * with a compound key "0 (sUSDS)", "1 (USDS-CLE)", etc.
+ * All other ref_codes are aggregated across tokens (same as the old by_refcode rollup).
  */
 function loadOurData(file: string): { data: DataMap; months2026: string[] } {
   const rows = parseCsv(fs.readFileSync(file, 'utf8'));
@@ -209,14 +233,16 @@ function loadOurData(file: string): { data: DataMap; months2026: string[] } {
   const data: DataMap = new Map();
   for (let i = 1; i < rows.length; i++) {
     const cols = rows[i];
-    const code = cols[0]?.trim();
-    if (!code) continue;
-    const mm = new Map<string, number>();
+    const rawCode = cols[0]?.trim();
+    const token   = cols[1]?.trim() ?? '';
+    if (!rawCode) continue;
+    const mapKey = SPLIT_CODES.has(rawCode) ? `${rawCode} (${token})` : rawCode;
+    if (!data.has(mapKey)) data.set(mapKey, new Map());
+    const mm = data.get(mapKey)!;
     for (const m of months2026) {
       const v = parseFloat(cols[headers.indexOf(m)] ?? '');
-      if (!isNaN(v) && v !== 0) mm.set(m, v);
+      if (!isNaN(v) && v !== 0) mm.set(m, (mm.get(m) ?? 0) + v);
     }
-    data.set(code, mm);
   }
   return { data, months2026 };
 }
@@ -232,6 +258,8 @@ function loadSparkData(file: string): { data: DataMap; months2026: string[] } {
   const codeIdx = headers.indexOf('ref_code');
   const valIdx  = headers.indexOf('tw_reward_usd');
 
+  const tokenIdx = headers.indexOf('token');
+
   const data: DataMap = new Map();
   const monthSet = new Set<string>();
 
@@ -243,10 +271,13 @@ function loadSparkData(file: string): { data: DataMap; months2026: string[] } {
     if (month > '2026-05') continue;
     monthSet.add(month);
     const code = cols[codeIdx]?.trim() ?? '';
+    const token = tokenIdx >= 0 ? (cols[tokenIdx]?.trim() ?? '') : '';
+    // Mirror the compound-key split used in our pipeline for codes 0 and 1.
+    const mapKey = SPLIT_CODES.has(code) ? `${code} (${token})` : code;
     const val = parseFloat(cols[valIdx] ?? '0');
-    if (!code || isNaN(val)) continue;
-    if (!data.has(code)) data.set(code, new Map());
-    const mm = data.get(code)!;
+    if (!mapKey || isNaN(val)) continue;
+    if (!data.has(mapKey)) data.set(mapKey, new Map());
+    const mm = data.get(mapKey)!;
     mm.set(month, (mm.get(month) ?? 0) + val);
   }
 
@@ -336,7 +367,7 @@ function addSheet(wb: import('xlsx').WorkBook, aoa: (string | number)[][], name:
 
 function main(): void {
   const root = path.resolve('.');
-  const ourFile    = path.join(root, 'dune-results',   'dr_monthly_by_refcode.csv');
+  const ourFile    = path.join(root, 'dune-results',   'dr_monthly_by_refcode_token.csv');
   const sparkFile  = path.join(root, 'spark-dr-data',  'query_5650519_full.csv');
   const amatsuFile = path.join(root, 'amatsu-dr-data',
     'distribution-rewards-payouts-referralCode-monthly-2026-04-21_total.csv');
