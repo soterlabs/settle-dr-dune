@@ -3,14 +3,15 @@
  *
  * Produces a 6-tab Excel workbook comparing 2026 DR revenue across three sources.
  *
- * Data tabs (same column format — ref_code | YYYY-MM… | total):
- *   "Our Data"  — dune-results/dr_monthly_by_refcode.csv, all 2026 months
- *   "Spark"     — spark-dr-data/query_5650519_full.csv, aggregated by (month, ref_code)
- *   "Amatsu"    — amatsu-dr-data/...csv, Jan–Mar 2026 only
+ * Data tabs (same column format — ref_code | YYYY-MM… | total | notes):
+ *   "Soter Data" — dune-results/dr_monthly_by_refcode_token.csv, all 2026 months
+ *                  includes every ref_code found in Spark or Amatsu (blanks if absent)
+ *   "Spark"      — spark-dr-data/query_5650519_full.csv, aggregated by (month, ref_code)
+ *   "Amatsu"     — amatsu-dr-data/...csv, Jan–Mar 2026 only
  *
  * Diff tabs (source1 − source2, union of ref_codes, overlapping months):
- *   "Diff Ours-Spark"    — all 2026 months present in both
- *   "Diff Ours-Amatsu"   — Jan–Mar 2026; our −999999 + 99 merged → "untagged" to match Amatsu
+ *   "Diff Soter-Spark"   — all 2026 months present in both
+ *   "Diff Soter-Amatsu"  — Jan–Mar 2026; our −999999 + 99 merged → "untagged" to match Amatsu
  *   "Diff Spark-Amatsu"  — Jan–Mar 2026; Spark ref_code 99 renamed → "untagged" to match Amatsu
  *
  * Output: dune-results/dr_comparison_2026.xlsx
@@ -52,8 +53,30 @@ const UNTAGGED_CODES = new Set([
   '-999999', '99', '123623963915635', '90000000000000000000', 'untagged',
 ]);
 
-/** Note applied to ref_code 126 on every Diff tab. */
-const NOTE_126 = 'Subproxy holdings, no DR applied. Handled in Supply Side MSC.';
+/**
+ * Notes shown on every tab (data + diff) for specific ref_codes.
+ * Plain numeric keys match both plain codes and the base of compound codes
+ * (e.g. key '0' does NOT match '0 (sUSDS)' — compound codes get their own entry).
+ */
+const NOTES: Record<string, string> = {
+  '0 (USDS-CLE)': 'Chronicle farm — not tracked by Spark/BA.',
+  '1 (USDS-CLE)': 'Chronicle farm — not tracked by Spark/BA.',
+  '126':  'Subproxy holdings, no DR applied. Handled in Supply Side MSC.',
+  '127':  'Spark untagged Savings, had boosted DR applied by Amatsu.',
+  '130':  'Found in Spark datasets only, no onchain events.',
+  '188':  'Had boosted DR applied by Amatsu.',
+  '190':  'Had boosted DR applied by Amatsu.',
+  '191':  'Had boosted DR applied by Amatsu.',
+  '192':  'Had boosted DR applied by Amatsu.',
+  '195':  'Had boosted DR applied by Amatsu.',
+  '197':  'stUSDS. Amatsu/BA applied DR in Jan./Feb. then switched to 0.1% after. s/b 0.1% always applied.',
+  '1001': 'Feb. and Mar. had no DR by Amatsu.',
+  '1016': 'Amatsu included DR for sUSDC, sUSDS, SKY, while onchain, only events for SKY can be found. unknown which balances or events to use for sUSDC and sUSDS.',
+};
+
+function getNote(code: string): string {
+  return NOTES[code] ?? '';
+}
 
 /**
  * Ref_codes that are split by token in our output (compound keys like "0 (sUSDS)").
@@ -98,16 +121,26 @@ function refCell(code: string): string | number {
 // ─── sheet builders ───────────────────────────────────────────────────────────
 
 /**
- * Build AOA for a data tab: [ref_code, month…, total] per sorted ref_code.
+ * Build AOA for a data tab: [ref_code, month…, total, notes] per sorted ref_code.
  * Missing month values are left blank (empty string) so Excel displays no value.
  * Untagged ref_codes are separated to the bottom with a blank divider row.
+ *
+ * @param extraCodes Optional additional ref_codes to include even if absent from
+ *   `data` (used for the Soter tab to show every code found in Spark or Amatsu).
  */
-function buildAoa(data: DataMap, months: string[]): (string | number)[][] {
-  const allCodes = sortedCodes([...data.keys()]);
-  const taggedCodes   = allCodes.filter(c => !UNTAGGED_CODES.has(c));
-  const untaggedCodes = allCodes.filter(c =>  UNTAGGED_CODES.has(c));
+function buildAoa(
+  data: DataMap,
+  months: string[],
+  extraCodes?: Iterable<string>,
+): (string | number)[][] {
+  const codeSet = new Set(data.keys());
+  if (extraCodes) for (const c of extraCodes) codeSet.add(c);
 
-  const header: (string | number)[] = ['ref_code', ...months, 'total'];
+  const allSorted    = sortedCodes([...codeSet]);
+  const taggedCodes   = allSorted.filter(c => !UNTAGGED_CODES.has(c));
+  const untaggedCodes = allSorted.filter(c =>  UNTAGGED_CODES.has(c));
+
+  const header: (string | number)[] = ['ref_code', ...months, 'total', 'notes'];
   const blankRow: (string | number)[] = Array(header.length).fill('');
 
   const makeRow = (code: string): (string | number)[] => {
@@ -117,7 +150,7 @@ function buildAoa(data: DataMap, months: string[]): (string | number)[][] {
       return v !== undefined ? round2(v) : ('' as string | number);
     });
     const total = round2(vals.reduce<number>((s, v) => s + (typeof v === 'number' ? v : 0), 0));
-    return [refCell(code), ...vals, total];
+    return [refCell(code), ...vals, total, getNote(code)];
   };
 
   const untaggedHeader: (string | number)[] = ['── untagged ──', ...Array(header.length - 1).fill('')];
@@ -155,11 +188,7 @@ function buildDiffAoa(
   const makeRow = (code: string): (string | number)[] => {
     const has1 = d1.has(code), has2 = d2.has(code);
     const present = has1 && has2 ? 'both' : has1 ? `${label1} only` : `${label2} only`;
-    const notes = code === '126'          ? NOTE_126
-                : code === '130'          ? 'Found in Spark datasets only, no onchain events.'
-                : code === '0 (USDS-CLE)' || code === '1 (USDS-CLE)'
-                                          ? 'Chronicle farm — not tracked by Spark.'
-                : '';
+    const notes = getNote(code);
     const m1 = d1.get(code) ?? new Map<string, number>();
     const m2 = d2.get(code) ?? new Map<string, number>();
     const diffs = months.map(m => round2((m1.get(m) ?? 0) - (m2.get(m) ?? 0)));
@@ -389,17 +418,21 @@ function main(): void {
   // Overlapping months for ours-vs-spark
   const ourSparkMonths = ourMonths.filter(m => sparkMonths.includes(m));
 
-  console.log(`  Our Data : ${ourMonths.length} months, ${ourData.size} ref_codes`);
+  console.log(`  Soter    : ${ourMonths.length} months, ${ourData.size} ref_codes`);
   console.log(`  Spark    : ${sparkMonths.length} months, ${sparkData.size} ref_codes`);
   console.log(`  Amatsu   : ${amatsuMonths.length} months, ${amatsuData.size} ref_codes`);
 
+  // All codes from any source — used to include rows in the Soter tab even if our
+  // pipeline returned no data for that code (blanks shown for missing values).
+  const allRefCodes = new Set([...ourData.keys(), ...sparkData.keys(), ...amatsuData.keys()]);
+
   const tabs: Array<{ name: string; aoa: (string | number)[][] }> = [
-    { name: 'Our Data',          aoa: buildAoa(ourData,        ourMonths)                                        },
-    { name: 'Spark',             aoa: buildAoa(sparkData,      sparkMonths)                                      },
-    { name: 'Amatsu',            aoa: buildAoa(amatsuData,     amatsuMonths)                                     },
-    { name: 'Diff Ours-Spark',   aoa: buildDiffAoa(ourData,        sparkData,  ourSparkMonths, 'ours',  'spark') },
-    { name: 'Diff Ours-Amatsu',  aoa: buildDiffAoa(ourForAmatsu,   amatsuData, amatsuMonths,   'ours',  'amatsu') },
-    { name: 'Diff Spark-Amatsu', aoa: buildDiffAoa(sparkForAmatsu, amatsuData, amatsuMonths,   'spark', 'amatsu') },
+    { name: 'Soter Data',         aoa: buildAoa(ourData,        ourMonths,      allRefCodes)                       },
+    { name: 'Spark',              aoa: buildAoa(sparkData,      sparkMonths)                                       },
+    { name: 'Amatsu',             aoa: buildAoa(amatsuData,     amatsuMonths)                                      },
+    { name: 'Diff Soter-Spark',   aoa: buildDiffAoa(ourData,        sparkData,  ourSparkMonths, 'soter', 'spark')  },
+    { name: 'Diff Soter-Amatsu',  aoa: buildDiffAoa(ourForAmatsu,   amatsuData, amatsuMonths,   'soter', 'amatsu') },
+    { name: 'Diff Spark-Amatsu',  aoa: buildDiffAoa(sparkForAmatsu, amatsuData, amatsuMonths,   'spark', 'amatsu') },
   ];
 
   if (!fs.existsSync(path.dirname(outFile))) fs.mkdirSync(path.dirname(outFile), { recursive: true });
