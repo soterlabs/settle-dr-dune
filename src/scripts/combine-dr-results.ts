@@ -48,6 +48,9 @@ const SOURCES: { source: string; id: number }[] = [
   { source: 'stusds',        id: 7646379 },
   { source: 'farms',         id: 7646380 },
   { source: 'sp',            id: 7683760 },
+  // USDS held in Aave aEthUSDS (0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259).
+  // Synthetic ref_code 9001.
+  { source: 'usds_aave',     id: 7752902 },
 ];
 
 const OUT_DIR = path.resolve('dune-results');

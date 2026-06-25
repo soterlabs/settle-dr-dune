@@ -28,6 +28,33 @@
 --   scan so it actually reduces bytes scanned / cost.
 -- =============================================================================
 with
+    -- #########################################################################
+    -- ##                                                                     ##
+    -- ##   CONTRACT ADDRESS EXCLUSION LIST                                   ##
+    -- ##                                                                     ##
+    -- ##   The addresses below are protocol/vault contracts that hold sUSDS  ##
+    -- ##   on behalf of other users. Counting them as individual depositors  ##
+    -- ##   double-counts the underlying positions they represent.            ##
+    -- ##   Any address here is silently dropped from the final output so     ##
+    -- ##   all downstream queries (monthly DR, diagnostics) inherit the      ##
+    -- ##   exclusion automatically.                                           ##
+    -- ##                                                                     ##
+    -- ##   Keep this list in sync with twa_susds_susdc_erc4626.sql.         ##
+    -- ##   To add a new entry: append a row below and document with a label. ##
+    -- ##                                                                     ##
+    -- #########################################################################
+    excluded_addresses (addr) as (
+        values
+            -- sUSDC vault contract (holds sUSDS on behalf of sUSDC depositors)
+            (0xbc65ad17c5c0a2a4d159fa5a503f4992c7b545fe),
+            -- Morpho protocol contract
+            (0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb),
+            -- Pendle protocol contract
+            (0xBe3d4ec488A0a042BB86F9176C24f8CD54018BA7),
+            -- Curve PSM contract
+            (0x00836Fe54625BE242BcFA286207795405ca4fD10)
+    ),
+
     token_targets (blockchain, token_symbol, token_addr, psm3_addr, decimals, start_date) as (
         values
             ('base',     'sUSDS', 0x5875eEE11Cf8398102FdAd704C9E96607675467a, 0x1601843c5E9bC251A3272907010AFa41Fa18347E, 18, date '2024-09-01'),
@@ -364,4 +391,5 @@ from complete_daily_balances b
 join token_targets tt
     on b.blockchain = tt.blockchain and b.contract_address = tt.token_addr
 where b.time_weighted_avg_balance > 0
+  and b.user_addr not in (select addr from excluded_addresses)
 order by b.blockchain, b.contract_address, b.user_addr, b.dt, b.ref_code;

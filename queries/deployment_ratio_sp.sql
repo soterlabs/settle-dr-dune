@@ -238,14 +238,30 @@ with
         group by blockchain, symbol, dt
     )
 
+-- *** DEPLOYMENT RATIO SCOPE — spUSDC ONLY ***
+-- spUSDT and spPYUSD are forced to idle = 0 / deployment_ratio = 1. Those vaults
+-- hold their underlying directly (no idle/deployed split), so the idle-vs-deployed
+-- model — and the USDT/PYUSD-in-vault "idle" measured above — is meaningless for
+-- them and was spuriously driving their ratio toward 0 (zeroing all their DR).
+-- Only spUSDC keeps the computed ratio. This DIVERGES from Spark (query_6398769
+-- applies the ratio to all non-spETH vaults) and is a deliberate, TO-BE-CONFIRMED
+-- choice. The idle CTEs above still run for all vaults but are ignored for
+-- spUSDT/spPYUSD here.
 select
     vt.blockchain,
     vt.vault_symbol,
     vt.dt,
     vt.vault_total_supply,
-    coalesce(vi.vault_idle_holdings, 0)                                        as vault_idle_holdings,
-    vt.vault_total_supply - coalesce(vi.vault_idle_holdings, 0)                as vault_deployed,
     case
+        when vt.vault_symbol in ('spUSDT', 'spPYUSD') then 0.0
+        else coalesce(vi.vault_idle_holdings, 0)
+    end                                                                        as vault_idle_holdings,
+    case
+        when vt.vault_symbol in ('spUSDT', 'spPYUSD') then vt.vault_total_supply
+        else vt.vault_total_supply - coalesce(vi.vault_idle_holdings, 0)
+    end                                                                        as vault_deployed,
+    case
+        when vt.vault_symbol in ('spUSDT', 'spPYUSD') then 1.0
         when vt.vault_total_supply > 0 then
             greatest(
                 (vt.vault_total_supply - coalesce(vi.vault_idle_holdings, 0))
