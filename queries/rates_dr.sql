@@ -16,7 +16,14 @@
 -- token -> reward_code mapping (applied downstream in dr_rewards_daily.sql):
 --   stUSDS                                  -> XR-stUSDS
 --   sUSDS, USDS-SKY, USDS-SPK, USDS-CLE     -> XR
---   sUSDC, spUSDC, spUSDT, spPYUSD, spETH   -> XR*
+--   sUSDC                                   -> XR  (boosted; see note below)
+--   spUSDC, spUSDT, spPYUSD, spETH          -> XR*
+--
+-- sUSDC RATE NOTE: sUSDC is eligible for the full XR rate (50 bps / 0.5% APY
+-- from 2026) rather than the XR* alternative rate (20 bps / 0.2% APY), because
+-- the sUSDC vault holds sUSDS as its underlying asset — sUSDS depositors inside
+-- sUSDC are therefore earning via the sUSDS mechanism and qualify for XR.
+-- Sky Atlas reference: https://sky-atlas.io/#f2b3688f-e9e0-4159-9af3-0502141babab
 -- =============================================================================
 with
     reward_rates (reward_code, reward_description, reward_per_apy, start_dt, end_dt) as (
@@ -25,8 +32,8 @@ with
             ('XR',        'Accessibility Rewards (sUSDS/USDS-SKY/USDS-SPK)',                0.005, date '2026-01-01', date '2030-12-31'),
             ('XR-stUSDS', 'Accessibility Rewards (stUSDS)',                                 0.006, date '2024-01-01', date '2025-12-31'),
             ('XR-stUSDS', 'Accessibility Rewards (stUSDS)',                                 0.001, date '2026-01-01', date '2030-12-31'),
-            ('XR*',       'Accessibility Rewards Alternative (sUSDC/spUSDC/spUSDT/spPYUSD/spETH)', 0.006, date '2024-01-01', date '2025-12-31'),
-            ('XR*',       'Accessibility Rewards Alternative (sUSDC/spUSDC/spUSDT/spPYUSD/spETH)', 0.002, date '2026-01-01', date '2030-12-31')
+            ('XR*',       'Accessibility Rewards Alternative (spUSDC/spUSDT/spPYUSD/spETH)', 0.006, date '2024-01-01', date '2025-12-31'),
+            ('XR*',       'Accessibility Rewards Alternative (spUSDC/spUSDT/spPYUSD/spETH)', 0.002, date '2026-01-01', date '2030-12-31')
     )
 
 select

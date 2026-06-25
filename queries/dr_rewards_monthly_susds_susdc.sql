@@ -35,7 +35,8 @@
 --
 -- Pipeline: TWA balance (query_7640317) x reward rate (query_7640322, by
 -- token-class + date) x sUSDS share->USD rate (query_7640323, by dt).
---   sUSDS -> reward_code XR ; sUSDC -> reward_code XR*.
+--   sUSDS -> reward_code XR ; sUSDC -> reward_code XR (boosted, same as sUSDS:
+--   sUSDC vault holds sUSDS as underlying; Sky Atlas ref f2b3688f).
 --   Both priced via the sUSDS conversion rate (Spark has no independent sUSDC
 --   rate).
 --
@@ -63,7 +64,7 @@ with
             b.amount / 365.0 * r.reward_per as tw_reward
         from balances b
         join query_7640322 r
-            on r.reward_code = (case when b.token = 'sUSDC' then 'XR*' else 'XR' end)
+            on r.reward_code = 'XR'
             and b.dt between r.start_dt and r.end_dt
     ),
 
