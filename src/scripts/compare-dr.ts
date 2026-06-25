@@ -1,10 +1,16 @@
 /**
  * compare-dr.ts
  *
- * Produces a 6-tab Excel workbook comparing 2026 DR revenue across three sources.
+ * Produces a multi-tab Excel workbook comparing 2026 DR revenue across sources.
+ *
+ * "Summary" (first tab) — Soter ref_codes bucketed into partner groups
+ *   (Skybase / Spark / Grove / Osero / Keel / Other) with per-month DR, a
+ *   current-year cumulative total per code, and a per-group subtotal. No notes.
+ * "Soter by Ref Code Token" — verbatim copy of the latest combined
+ *   dr_monthly_by_refcode_token.csv.
  *
  * Data tabs (same column format — ref_code | YYYY-MM… | total | notes):
- *   "Soter Data" — latest dune-results/combined/<TS>/dr_monthly_by_refcode_token.csv
+ *   "Soter by Ref Code" — latest dune-results/combined/<TS>/dr_monthly_by_refcode_token.csv
  *                  includes every ref_code found in Spark or Amatsu (blanks if absent)
  *   "Spark"      — spark-dr-data/query_5650519_full.csv, aggregated by (month, ref_code)
  *   "Amatsu"     — amatsu-dr-data/...csv, Jan–Mar 2026 only
@@ -244,6 +250,105 @@ function buildDiffAoa(
   };
 
   return [header, ...allCodes.map(makeRow)];
+}
+
+// ─── summary tab ────────────────────────────────────────────────────────────
+
+/**
+ * Partner groupings for the Summary tab, keyed by ref_code range:
+ *   Skybase — 0, 1, 1000-1999
+ *   Spark   — 2-999, EXCEPT 99 / 126 / 127 / 130-139 (untagged & house codes)
+ *   Grove   — 2000-2999
+ *   Osero   — 3000-3999
+ *   Keel    — 4000-4999
+ *   Other   — everything else (untagged -999999, the Spark exceptions above,
+ *             out-of-range synthetics like 9001, etc.) so nothing is dropped.
+ */
+function classifyGroup(code: string): string {
+  const n = numericBase(code);
+  if (!Number.isFinite(n)) return 'Other';
+  if (n === 0 || n === 1 || (n >= 1000 && n <= 1999)) return 'Skybase';
+  if (n >= 2 && n <= 999) {
+    if (n === 99 || n === 126 || n === 127 || (n >= 130 && n <= 139)) return 'Other';
+    return 'Spark';
+  }
+  if (n >= 2000 && n <= 2999) return 'Grove';
+  if (n >= 3000 && n <= 3999) return 'Osero';
+  if (n >= 4000 && n <= 4999) return 'Keel';
+  if (n === 9001) return 'Spark';
+  return 'Other';
+}
+
+const SUMMARY_GROUP_ORDER = ['Skybase', 'Spark', 'Grove', 'Osero', 'Keel', 'Other'];
+
+/**
+ * Build AOA for the Summary tab: ref_codes bucketed into partner groups, each
+ * with per-month DR and a current-year cumulative total per code, followed by a
+ * per-group subtotal row. No notes, no token lists. Codes with no current-year
+ * DR are omitted. Blank groups are skipped.
+ * Columns: group | ref_code | month… | total
+ */
+function buildSummaryAoa(data: DataMap, months: string[]): (string | number)[][] {
+  const header: (string | number)[] = ['group', 'ref_code', ...months, 'total'];
+  const out: (string | number)[][] = [header];
+  const blankRow: (string | number)[] = Array(header.length).fill('');
+
+  const byGroup = new Map<string, string[]>();
+  for (const [code, mm] of data) {
+    const total = months.reduce((s, m) => s + (mm.get(m) ?? 0), 0);
+    if (total === 0) continue; // skip codes with no current-year DR
+    const g = classifyGroup(code);
+    if (!byGroup.has(g)) byGroup.set(g, []);
+    byGroup.get(g)!.push(code);
+  }
+
+  let firstGroup = true;
+  for (const group of SUMMARY_GROUP_ORDER) {
+    const codes = sortedCodes(byGroup.get(group) ?? []);
+    if (codes.length === 0) continue;
+    if (!firstGroup) out.push([...blankRow]);
+    firstGroup = false;
+
+    const monthSum = new Map<string, number>();
+    let groupTotal = 0;
+
+    codes.forEach((code, idx) => {
+      const mm = data.get(code)!;
+      const cells = months.map(m => {
+        const v = mm.get(m);
+        if (v !== undefined) monthSum.set(m, (monthSum.get(m) ?? 0) + v);
+        return v === undefined || v === 0 ? '' : round2(v);
+      });
+      const total = months.reduce((s, m) => s + (mm.get(m) ?? 0), 0);
+      groupTotal += total;
+      out.push([idx === 0 ? group : '', refCell(code), ...cells, round2(total)]);
+    });
+
+    out.push([
+      '', 'Total',
+      ...months.map(m => { const v = monthSum.get(m) ?? 0; return v === 0 ? '' : round2(v); }),
+      round2(groupTotal),
+    ]);
+  }
+
+  return out;
+}
+
+/**
+ * Build AOA that faithfully mirrors a wide CSV (header + rows), coercing numeric
+ * cells to numbers so Excel treats them as values. Empty cells stay blank.
+ * Used for the "Soter by Ref Code Token" tab — a direct copy of the latest
+ * combined dr_monthly_by_refcode_token.csv.
+ */
+function buildRawCsvAoa(file: string): (string | number)[][] {
+  const rows = parseCsv(fs.readFileSync(file, 'utf8'));
+  return rows.map((row, ri) =>
+    row.map(cell => {
+      if (ri === 0 || cell === '') return cell;          // header / blank
+      const n = Number(cell);
+      return Number.isFinite(n) ? n : cell;              // numeric → number
+    }),
+  );
 }
 
 // ─── CSV parser ───────────────────────────────────────────────────────────────
@@ -521,6 +626,7 @@ function addSheet(wb: import('xlsx').WorkBook, aoa: (string | number)[][], name:
   const numCols = aoa[0]?.length ?? 0;
   const headers = (aoa[0] ?? []).map(String);
   ws['!cols'] = Array.from({ length: numCols }, (_, i) => {
+    if (headers[i] === 'group')      return { wch: 12 };
     if (headers[i] === 'ref_code')   return { wch: 20 };
     if (headers[i] === 'present_in') return { wch: 14 };
     if (headers[i] === 'tokens')     return { wch: 45 };
@@ -621,7 +727,9 @@ function main(): void {
   ]);
 
   const tabs: Array<{ name: string; aoa: (string | number)[][] }> = [
-    { name: 'Soter Data',          aoa: buildAoa(ourData,           ourMonths,      allRefCodes, tokensByCode)             },
+    { name: 'Summary',             aoa: buildSummaryAoa(ourData,    ourMonths)                                             },
+    { name: 'Soter by Ref Code',   aoa: buildAoa(ourData,           ourMonths,      allRefCodes, tokensByCode)             },
+    { name: 'Soter by Ref Code Token', aoa: buildRawCsvAoa(ourFile)                                                        },
     { name: 'Soter Rates',         aoa: buildRatesAoa(allTokens,    ourMonths)                                             },
     { name: 'Spark',               aoa: buildAoa(sparkData,         sparkMonths)                                          },
     { name: 'Amatsu',              aoa: buildAoa(amatsuData,        amatsuMonths)                                         },
