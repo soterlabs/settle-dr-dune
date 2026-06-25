@@ -7,8 +7,8 @@
 -- ##   that they appear as explicit, identifiable line items rather than      ##
 -- ##   polluting the generic untagged bucket:                                 ##
 -- ##                                                                         ##
--- ##       spUSDC   ->  ref_code 130                                         ##
--- ##       spUSDT   ->  ref_code 131                                         ##
+-- ##       spUSDC   ->  ref_code 131                                         ##
+-- ##       spUSDT   ->  ref_code 130                                         ##
 -- ##       spPYUSD  ->  ref_code 132                                         ##
 -- ##                                                                         ##
 -- ##   We are RESERVING codes 130–139 for Spark Savings synthetic            ##
@@ -71,8 +71,8 @@ with
             symbol as token,
             -- Spark Savings untagged fallback (see bold header note; codes 130-139 reserved).
             case
-                when symbol = 'spUSDC'  and ref_code in (-999999, 127) then 130
-                when symbol = 'spUSDT'  and ref_code in (-999999, 127) then 131
+                when symbol = 'spUSDC'  and ref_code in (-999999, 127) then 131
+                when symbol = 'spUSDT'  and ref_code in (-999999, 127) then 130
                 when symbol = 'spPYUSD' and ref_code in (-999999, 127) then 132
                 else ref_code
             end as ref_code,
