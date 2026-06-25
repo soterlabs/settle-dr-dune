@@ -4,7 +4,7 @@
  * Produces a 6-tab Excel workbook comparing 2026 DR revenue across three sources.
  *
  * Data tabs (same column format — ref_code | YYYY-MM… | total | notes):
- *   "Soter Data" — dune-results/dr_monthly_by_refcode_token.csv, all 2026 months
+ *   "Soter Data" — latest dune-results/combined/<TS>/dr_monthly_by_refcode_token.csv
  *                  includes every ref_code found in Spark or Amatsu (blanks if absent)
  *   "Spark"      — spark-dr-data/query_5650519_full.csv, aggregated by (month, ref_code)
  *   "Amatsu"     — amatsu-dr-data/...csv, Jan–Mar 2026 only
@@ -14,8 +14,15 @@
  *   "Diff Soter-Amatsu"  — Jan–Mar 2026; our −999999 + 99 merged → "untagged" to match Amatsu
  *   "Diff Spark-Amatsu"  — Jan–Mar 2026; Spark ref_code 99 renamed → "untagged" to match Amatsu
  *
- * Output: dune-results/dr_comparison_2026.xlsx
+ * Input:  by default the LATEST dune-results/combined/<TS>/ run (created by
+ *         combine-dr-results.ts). Override with:
+ *           --combined <TS>     pin a specific combined run-dir name
+ *           --input <path.csv>  point directly at a by_refcode_token CSV
+ * Output: a versioned dune-results/comparison/<TS>/dr_comparison_2026.xlsx
+ *         (own fresh timestamp, never overwrites). Override with --out <path>.
  * Usage:  npm run compare
+ *         npm run compare -- --combined 2026-06-11_035558
+ *         npm run compare -- --input some/path.csv --out some/out.xlsx
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -546,15 +553,59 @@ function addSheet(wb: import('xlsx').WorkBook, aoa: (string | number)[][], name:
   utils.book_append_sheet(wb, ws, name);
 }
 
+/** Simple `--flag value` lookup over process.argv (returns undefined if absent). */
+function getArg(flag: string): string | undefined {
+  const i = process.argv.indexOf(flag);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+}
+
+/** Local timestamp YYYY-MM-DD_HHMMSS — Windows-safe and lexically sortable. */
+function runStamp(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_` +
+         `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+/** Lexically-greatest (i.e. newest) run-dir name under dune-results/combined/. */
+function latestCombinedRun(combinedRoot: string): string {
+  if (!fs.existsSync(combinedRoot)) {
+    throw new Error(`No combined/ directory found at ${combinedRoot} — run \`npm run combine\` first.`);
+  }
+  const runs = fs.readdirSync(combinedRoot, { withFileTypes: true })
+    .filter(e => e.isDirectory())
+    .map(e => e.name)
+    .sort();
+  if (runs.length === 0) throw new Error(`No combined runs found in ${combinedRoot} — run \`npm run combine\` first.`);
+  return runs[runs.length - 1];
+}
+
 function main(): void {
   const root = path.resolve('.');
-  const ourFile      = path.join(root, 'dune-results',    'dr_monthly_by_refcode_token.csv');
-  const sparkFile    = path.join(root, 'spark-dr-data',   'query_5650519_full.csv');
-  const amatsuFile   = path.join(root, 'amatsu-dr-data',
+
+  // Resolve the "Soter" input: explicit --input wins, else a --combined run dir,
+  // else the latest combined/<TS>/ run.
+  const combinedRoot = path.join(root, 'dune-results', 'combined');
+  const inputArg = getArg('--input');
+  let ourFile: string;
+  if (inputArg) {
+    ourFile = path.resolve(inputArg);
+  } else {
+    const run = getArg('--combined') ?? latestCombinedRun(combinedRoot);
+    ourFile = path.join(combinedRoot, run, 'dr_monthly_by_refcode_token.csv');
+  }
+
+  const sparkFile   = path.join(root, 'spark-dr-data',  'query_5650519_full.csv');
+  const amatsuFile  = path.join(root, 'amatsu-dr-data',
     'distribution-rewards-payouts-referralCode-monthly-2026-04-21_total.csv');
-  const baFile       = path.join(root, 'ba-dr-data',      'ba-all-codes.csv');
-  const payoutsFile  = path.join(root, 'payouts-dr-data', 'payouts.csv');
-  const outFile      = path.join(root, 'dune-results',    'dr_comparison_2026.xlsx');
+  const baFile      = path.join(root, 'ba-dr-data',     'ba-all-codes.csv');
+  const payoutsFile = path.join(root, 'payouts-dr-data', 'payouts.csv');
+
+  // Output is versioned into its own fresh-timestamp comparison run dir.
+  const outFile = getArg('--out')
+    ? path.resolve(getArg('--out')!)
+    : path.join(root, 'dune-results', 'comparison', runStamp(), 'dr_comparison_2026.xlsx');
+
+  console.log(`Input (Soter): ${path.relative(root, ourFile)}`);
 
   for (const f of [ourFile, sparkFile, amatsuFile, baFile, payoutsFile]) {
     if (!fs.existsSync(f)) { console.error(`Missing: ${f}`); process.exit(1); }

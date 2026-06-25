@@ -13,7 +13,11 @@
  *
  *   $env:DUNE_API_KEY="..."; npx tsx src/scripts/combine-dr-results.ts
  *
- * Writes three CSVs to dune-results/, pivoted WIDE (one column per YYYY-MM):
+ * Output is versioned: each run writes into its OWN timestamped directory
+ *   dune-results/combined/<YYYY-MM-DD_HHMMSS>/
+ * so prior results are never overwritten (the Dune source results are cached
+ * and not always reproducible, so we keep every run under version control).
+ * Three CSVs are written there, pivoted WIDE (one column per YYYY-MM):
  *   - dr_monthly_by_refcode.csv
  *   - dr_monthly_by_refcode_token.csv
  *   - dr_monthly_combined.csv
@@ -56,7 +60,16 @@ const SOURCES: { source: string; id: number }[] = [
   { source: 'usds_ref4001',  id: 7809596 },
 ];
 
-const OUT_DIR = path.resolve('dune-results');
+// Local timestamp YYYY-MM-DD_HHMMSS — Windows-safe (no colons) and lexically
+// sortable, so the newest run dir is always the lexically-greatest name.
+function runStamp(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_` +
+         `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+// Each run gets its own timestamped subdir under dune-results/combined/.
+const OUT_DIR = path.resolve('dune-results', 'combined', runStamp());
 
 interface MonthlyRow {
   month: string;
@@ -103,6 +116,7 @@ function writeCsv(file: string, header: string[], rows: unknown[][]): void {
 
 async function main() {
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
+  console.log(`Run dir: ${path.relative(process.cwd(), OUT_DIR)}\n`);
 
   const all: (MonthlyRow & { source: string })[] = [];
 
