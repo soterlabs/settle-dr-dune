@@ -639,7 +639,13 @@ function main(): void {
   for (const { name, aoa } of tabs) addSheet(wb, aoa, name);
   writeFile(wb, outFile);
 
+  // Also write to a fixed well-known path so consumers always find the latest
+  // without knowing the timestamp. The timestamped copy above is the archive.
+  const latestFile = path.join(root, 'dune-results', 'dr_comparison_latest.xlsx');
+  fs.copyFileSync(outFile, latestFile);
+
   console.log(`\nWritten: ${path.relative(root, outFile)}`);
+  console.log(`Latest:  ${path.relative(root, latestFile)}`);
   console.log('Tabs: ' + tabs.map(t => t.name).join(' | '));
 }
 
