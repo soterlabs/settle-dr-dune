@@ -26,7 +26,6 @@ const MAP: Record<string, { id: number; file: string }> = {
   sp:          { id: 7640321, file: 'twa_sp_vaults.sql' },
   // Monthly DR source queries.
   usds_aave:      { id: 7812438, file: 'dr_rewards_monthly_usds_aave.sql' },
-  usds_contract:  { id: 0, file: 'dr_rewards_monthly_usds_contract.sql' }, // TODO: publish to Dune and replace 0 with the real query ID
   usds_ref4001:   { id: 7809596, file: 'dr_rewards_monthly_usds_ref4001.sql' },
   // Per-chain PSM3 monthly queries (split from retired 7646378).
   psm3_base:      { id: 7647196, file: 'dr_rewards_monthly_psm3_base.sql' },
