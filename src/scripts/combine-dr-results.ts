@@ -55,7 +55,7 @@ const SOURCES: { source: string; id: number }[] = [
   // USDS held in Aave aEthUSDS (0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259).
   // Synthetic ref_code 9001.
   { source: 'usds_aave',     id: 7812438 },
-  // USDS held at 0x1e1D42781FC170EF9da004Fb735f56F0276d01B8.
+  // USDS held at in Solana OFT Bridge 0x1e1D42781FC170EF9da004Fb735f56F0276d01B8.
   // Synthetic ref_code 4001.
   { source: 'usds_ref4001',  id: 7809596 },
 ];
