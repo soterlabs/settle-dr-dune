@@ -24,6 +24,9 @@ const MAP: Record<string, { id: number; file: string }> = {
   stusds:      { id: 7640319, file: 'twa_stusds.sql' },
   farms:       { id: 7640320, file: 'twa_usds_staking_farms.sql' },
   sp:          { id: 7640321, file: 'twa_sp_vaults.sql' },
+  // Monthly DR source queries.
+  usds_aave:      { id: 7812438, file: 'dr_rewards_monthly_usds_aave.sql' },
+  usds_ref4001:   { id: 7809596, file: 'dr_rewards_monthly_usds_ref4001.sql' },
   // Per-chain PSM3 monthly queries (split from retired 7646378).
   psm3_base:      { id: 7647196, file: 'dr_rewards_monthly_psm3_base.sql' },
   psm3_arbitrum:  { id: 7647197, file: 'dr_rewards_monthly_psm3_arbitrum.sql' },
