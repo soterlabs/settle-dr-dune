@@ -23,6 +23,33 @@
 --   scan so it actually reduces bytes scanned / cost.
 -- =============================================================================
 with
+    -- #########################################################################
+    -- ##                                                                     ##
+    -- ##   CONTRACT ADDRESS EXCLUSION LIST                                   ##
+    -- ##                                                                     ##
+    -- ##   The addresses below are protocol/vault contracts that hold sUSDS  ##
+    -- ##   on behalf of other users. Counting them as individual depositors  ##
+    -- ##   double-counts the underlying positions they represent.            ##
+    -- ##   Any address here is silently dropped from the final output so     ##
+    -- ##   all downstream queries (monthly DR, diagnostics) inherit the      ##
+    -- ##   exclusion automatically.                                           ##
+    -- ##                                                                     ##
+    -- ##   To add a new entry: append a row to excluded_addresses below and  ##
+    -- ##   document it with a label comment.                                 ##
+    -- ##                                                                     ##
+    -- #########################################################################
+    excluded_addresses (addr) as (
+        values
+            -- sUSDC vault contract (holds sUSDS on behalf of sUSDC depositors)
+            (0xbc65ad17c5c0a2a4d159fa5a503f4992c7b545fe),
+            -- Morpho protocol contract
+            (0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb),
+            -- Pendle protocol contract
+            (0xBe3d4ec488A0a042BB86F9176C24f8CD54018BA7),
+            -- Curve PSM contract
+            (0x00836Fe54625BE242BcFA286207795405ca4fD10)
+    ),
+
     token_targets (blockchain, token_symbol, token_addr, decimals, start_date) as (
         values
             ('ethereum', 'sUSDS', 0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD, 18, date '2024-09-01'),
@@ -84,23 +111,26 @@ with
         where r.rn = 1
     ),
 
-    -- Fallback: one ref_code per (tx, contract, blockchain) — no user_addr constraint.
-    -- Used on INCOMING transfers when the Referral event's `owner` is an intermediary
-    -- (e.g. Paraswap 0xDEF171Fe48CF0115B1d80b88dc8eAB59176FEe57) that deposits on behalf
-    -- of users, so `owner` ≠ the Transfer `to` address and the primary join misses.
-    referral_per_tx_fallback as (
-        select evt_tx_hash, contract_address, blockchain, ref_code
-        from (
-            select
-                evt_tx_hash, contract_address, blockchain, ref_code,
-                row_number() over (
-                    partition by evt_tx_hash, contract_address, blockchain
-                    order by evt_index desc
-                ) as rn
-            from raw_referral_events
-        ) r
-        where r.rn = 1
-    ),
+    -- #########################################################################
+    -- ##  TEMPORARILY REMOVED — per-transaction referral fallback attribution ##
+    -- ##                                                                       ##
+    -- ##  A `referral_per_tx_fallback` CTE previously attributed a tx's        ##
+    -- ##  ref_code to the INCOMING transfer recipient by (tx_hash, contract)   ##
+    -- ##  ALONE, with NO user_addr constraint. When the Referral event's       ##
+    -- ##  `owner` was an intermediary/aggregator (Paraswap, CoWSwap, etc.)     ##
+    -- ##  that deposited on behalf of users, this manually re-routed that      ##
+    -- ##  aggregator code (e.g. 1003, 1004, 4011) onto whoever received the    ##
+    -- ##  shares in that transaction.                                          ##
+    -- ##                                                                       ##
+    -- ##  This manual cross-event attribution has methodology problems, so it  ##
+    -- ##  is REMOVED. ref_code now comes ONLY from the direct Referral event   ##
+    -- ##  matched by (tx_hash, owner = recipient) via latest_referral_per_tx.  ##
+    -- ##  Transfers whose Referral `owner` is an intermediary therefore fall   ##
+    -- ##  through to untagged (-999999) instead of being attributed.           ##
+    -- ##                                                                       ##
+    -- ##  >>> TEMPORARY <<<  Re-introduce a corrected attribution once the     ##
+    -- ##  methodology is rebuilt and the resulting numbers are analyzed.       ##
+    -- #########################################################################
 
     -- -------------------------------------------------------------------------
     -- 2. Transfer events -> signed balance changes, with the tx's ref_code attached.
@@ -112,15 +142,12 @@ with
                tr.evt_block_time as ts, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
                tr."to" as user_addr,
                cast(tr.value as double) / power(10, tt.decimals) as amount_change,
-               coalesce(lr.ref_code, fb.ref_code) as ref_code
+               lr.ref_code as ref_code
         from sky_ethereum.susds_evt_transfer tr
         join token_targets tt on tr.contract_address = tt.token_addr and tt.blockchain = 'ethereum'
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'ethereum'
-        left join referral_per_tx_fallback fb
-            on tr.evt_tx_hash = fb.evt_tx_hash
-            and tr.contract_address = fb.contract_address and fb.blockchain = 'ethereum'
         where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         -- sUSDS ethereum (CONFIRMED) -- outgoing
@@ -140,15 +167,12 @@ with
         select 'ethereum', tt.token_addr, tr.evt_block_time, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
                tr."to",
                cast(tr.value as double) / power(10, tt.decimals),
-               coalesce(lr.ref_code, fb.ref_code)
+               lr.ref_code
         from sky_ethereum.usdcvault_evt_transfer tr
         join token_targets tt on tr.contract_address = tt.token_addr and tt.blockchain = 'ethereum'
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'ethereum'
-        left join referral_per_tx_fallback fb
-            on tr.evt_tx_hash = fb.evt_tx_hash
-            and tr.contract_address = fb.contract_address and fb.blockchain = 'ethereum'
         where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         -- sUSDC ethereum -- outgoing
@@ -168,15 +192,12 @@ with
         select 'base', tt.token_addr, tr.evt_block_time, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
                tr."to",
                cast(tr.value as double) / power(10, tt.decimals),
-               coalesce(lr.ref_code, fb.ref_code)
+               lr.ref_code
         from sky_base.usdcvaultl2_evt_transfer tr
         join token_targets tt on tr.contract_address = tt.token_addr and tt.blockchain = 'base'
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'base'
-        left join referral_per_tx_fallback fb
-            on tr.evt_tx_hash = fb.evt_tx_hash
-            and tr.contract_address = fb.contract_address and fb.blockchain = 'base'
         where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         -- sUSDC base -- outgoing
@@ -196,15 +217,12 @@ with
         select 'arbitrum', tt.token_addr, tr.evt_block_time, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
                tr."to",
                cast(tr.value as double) / power(10, tt.decimals),
-               coalesce(lr.ref_code, fb.ref_code)
+               lr.ref_code
         from sky_arbitrum.usdcvaultl2_evt_transfer tr
         join token_targets tt on tr.contract_address = tt.token_addr and tt.blockchain = 'arbitrum'
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'arbitrum'
-        left join referral_per_tx_fallback fb
-            on tr.evt_tx_hash = fb.evt_tx_hash
-            and tr.contract_address = fb.contract_address and fb.blockchain = 'arbitrum'
         where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         -- sUSDC arbitrum -- outgoing
@@ -224,15 +242,12 @@ with
         select 'optimism', tt.token_addr, tr.evt_block_time, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
                tr."to",
                cast(tr.value as double) / power(10, tt.decimals),
-               coalesce(lr.ref_code, fb.ref_code)
+               lr.ref_code
         from sky_optimism.usdcvaultl2_evt_transfer tr
         join token_targets tt on tr.contract_address = tt.token_addr and tt.blockchain = 'optimism'
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'optimism'
-        left join referral_per_tx_fallback fb
-            on tr.evt_tx_hash = fb.evt_tx_hash
-            and tr.contract_address = fb.contract_address and fb.blockchain = 'optimism'
         where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         -- sUSDC optimism -- outgoing
@@ -252,15 +267,12 @@ with
         select 'unichain', tt.token_addr, tr.evt_block_time, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
                tr."to",
                cast(tr.value as double) / power(10, tt.decimals),
-               coalesce(lr.ref_code, fb.ref_code)
+               lr.ref_code
         from sky_unichain.usdcvaultl2_evt_transfer tr
         join token_targets tt on tr.contract_address = tt.token_addr and tt.blockchain = 'unichain'
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'unichain'
-        left join referral_per_tx_fallback fb
-            on tr.evt_tx_hash = fb.evt_tx_hash
-            and tr.contract_address = fb.contract_address and fb.blockchain = 'unichain'
         where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         -- sUSDC unichain -- outgoing
@@ -458,4 +470,5 @@ from complete_daily_balances b
 join token_targets tt
     on b.blockchain = tt.blockchain and b.contract_address = tt.token_addr
 where b.time_weighted_avg_balance > 0
+  and b.user_addr not in (select addr from excluded_addresses)
 order by b.blockchain, b.contract_address, b.user_addr, b.dt, b.ref_code;

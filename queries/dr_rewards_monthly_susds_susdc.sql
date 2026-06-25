@@ -1,3 +1,25 @@
+-- #############################################################################
+-- ##                                                                         ##
+-- ##   !!!  UNTAGGED BALANCE RECLASSIFICATION — MIRRORS SPARK METHODOLOGY  !!!##
+-- ##                                                                         ##
+-- ##   Any balance where ref_code = -999999 (untagged — no Referral event   ##
+-- ##   matched the deposit, or balance arrived via secondary transfer) is    ##
+-- ##   reassigned to a dedicated house code:                                 ##
+-- ##                                                                         ##
+-- ##       sUSDS  untagged  ->  ref_code  99                                 ##
+-- ##       sUSDC  untagged  ->  ref_code 127                                 ##
+-- ##                                                                         ##
+-- ##   This exactly replicates Spark's own aggregation query (query_5310067  ##
+-- ##   / https://dune.com/queries/5310067), which does the same remap before ##
+-- ##   summing balances. ref_code 99 therefore means "Spark house / untagged ##
+-- ##   sUSDS" throughout the pipeline — it is NOT a real referral partner.   ##
+-- ##                                                                         ##
+-- ##   A large fraction of total sUSDS supply lands here because most        ##
+-- ##   holder-days are no-transaction forward-fill days (no Referral event   ##
+-- ##   fires) and secondary wallet-to-wallet sUSDS transfers never emit a    ##
+-- ##   Referral event. This is expected and consistent with Spark's numbers. ##
+-- ##                                                                         ##
+-- #############################################################################
 -- =============================================================================
 -- DR revenue (MONTHLY) — sUSDS + sUSDC, all chains
 -- -----------------------------------------------------------------------------
@@ -15,8 +37,7 @@
 -- token-class + date) x sUSDS share->USD rate (query_7640323, by dt).
 --   sUSDS -> reward_code XR ; sUSDC -> reward_code XR*.
 --   Both priced via the sUSDS conversion rate (Spark has no independent sUSDC
---   rate). Untagged reclassification mirrors query_5310067: sUSDC -> 127,
---   sUSDS -> 99.
+--   rate).
 --
 -- SAVED AS: query_7646377  (https://dune.com/queries/7646377)
 -- =============================================================================
