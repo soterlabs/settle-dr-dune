@@ -65,7 +65,7 @@ function parseMonthCol(col: string): string | null {
  */
 const NOTES: Record<string, string> = {
   '-999999': 'Synthetic code: Untagged USDS-CLE, USDS-SKY, USDS-SPK, stUSDS.',
-  '0':  'Methodolgy needs review. Results in agreement with other parties, but swaps using default ref code may be incorrectly applied.',
+  '0':  'Methodology needs review. Results in agreement with other parties, but swaps using default ref code may be incorrectly applied.',
   '99':  'Synthetic code: Untagged sUSDS.',
   '126':  'Subproxy holdings, no DR applied. Handled in Supply Side MSC.',
   '127':  'Synthetic code: untagged sUSDC',
@@ -283,13 +283,13 @@ const SUMMARY_GROUP_ORDER = ['Skybase', 'Spark', 'Grove', 'Osero', 'Keel', 'Othe
 
 /**
  * Build AOA for the Summary tab: ref_codes bucketed into partner groups, each
- * with per-month DR and a current-year cumulative total per code, followed by a
- * per-group subtotal row. No notes, no token lists. Codes with no current-year
- * DR are omitted. Blank groups are skipped.
- * Columns: group | ref_code | month… | total
+ * with per-month DR, a current-year cumulative total per code, a notes column,
+ * and a per-group subtotal row. Codes with no current-year DR are omitted.
+ * Blank groups are skipped.
+ * Columns: group | ref_code | month… | total | notes
  */
 function buildSummaryAoa(data: DataMap, months: string[]): (string | number)[][] {
-  const header: (string | number)[] = ['group', 'ref_code', ...months, 'total'];
+  const header: (string | number)[] = ['group', 'ref_code', ...months, 'total', 'notes'];
   const out: (string | number)[][] = [header];
   const blankRow: (string | number)[] = Array(header.length).fill('');
 
@@ -321,13 +321,13 @@ function buildSummaryAoa(data: DataMap, months: string[]): (string | number)[][]
       });
       const total = months.reduce((s, m) => s + (mm.get(m) ?? 0), 0);
       groupTotal += total;
-      out.push([idx === 0 ? group : '', refCell(code), ...cells, round2(total)]);
+      out.push([idx === 0 ? group : '', refCell(code), ...cells, round2(total), getNote(code)]);
     });
 
     out.push([
       '', 'Total',
       ...months.map(m => { const v = monthSum.get(m) ?? 0; return v === 0 ? '' : round2(v); }),
-      round2(groupTotal),
+      round2(groupTotal), '',
     ]);
   }
 
