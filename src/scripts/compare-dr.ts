@@ -59,6 +59,7 @@ function parseMonthCol(col: string): string | null {
  */
 const NOTES: Record<string, string> = {
   '-999999': 'Synthetic code: Untagged USDS-CLE, USDS-SKY, USDS-SPK, stUSDS.',
+  '0':  'Methodolgy needs review. Results in agreement with other parties, but swaps using default ref code may be incorrectly applied.',
   '99':  'Synthetic code: Untagged sUSDS.',
   '126':  'Subproxy holdings, no DR applied. Handled in Supply Side MSC.',
   '127':  'Synthetic code: untagged sUSDC',
