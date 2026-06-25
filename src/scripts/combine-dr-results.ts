@@ -54,7 +54,7 @@ const SOURCES: { source: string; id: number }[] = [
   { source: 'sp',            id: 7683760 },
   // USDS held in Aave aEthUSDS (0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259).
   // Synthetic ref_code 9001.
-  { source: 'usds_aave',     id: 7752902 },
+  { source: 'usds_aave',     id: 7812438 },
   // USDS held at 0x1e1D42781FC170EF9da004Fb735f56F0276d01B8.
   // Synthetic ref_code 4001.
   { source: 'usds_ref4001',  id: 7809596 },
@@ -94,7 +94,12 @@ async function fetchLatestRows(id: number): Promise<MonthlyRow[]> {
       is_execution_finished?: boolean;
       next_offset?: number | null;
     };
-    const batch = j.result?.rows ?? [];
+    const rawBatch = (j.result?.rows ?? []) as unknown as Record<string, unknown>[];
+    // Normalise: some saved queries use 'dt' instead of 'month' as the date column.
+    const batch = rawBatch.map((r) => ({
+      ...r,
+      month: (r['month'] ?? r['dt']) as string,
+    })) as unknown as MonthlyRow[];
     rows.push(...batch);
     if (batch.length < limit || j.next_offset == null) break;
     offset = j.next_offset;
