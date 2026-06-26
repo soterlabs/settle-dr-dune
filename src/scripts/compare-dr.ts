@@ -255,19 +255,18 @@ function buildDiffAoa(
 /**
  * Partner groupings for the Summary tab, keyed by ref_code range:
  *   Skybase — 0, 1, 1000-1999
- *   Spark   — 2-999, EXCEPT 99 / 126 / 127 / 130-139 (untagged & house codes)
+ *   Spark   — 2-999, EXCEPT 99 / 126 (untagged sUSDS & subproxy synthetic codes)
  *   Grove   — 2000-2999
  *   Osero   — 3000-3999
  *   Keel    — 4000-4999
- *   Other   — everything else (untagged -999999, the Spark exceptions above,
- *             out-of-range synthetics like 9001, etc.) so nothing is dropped.
+ *   Other   — everything else (-999999, 99, 126, out-of-range synthetics, etc.)
  */
 function classifyGroup(code: string): string {
   const n = numericBase(code);
   if (!Number.isFinite(n)) return 'Other';
   if (n === 0 || n === 1 || (n >= 1000 && n <= 1999)) return 'Skybase';
   if (n >= 2 && n <= 999) {
-    if (n === 99 || n === 126 || n === 127 || (n >= 130 && n <= 139)) return 'Other';
+    if (n === 99 || n === 126) return 'Other';
     return 'Spark';
   }
   if (n >= 2000 && n <= 2999) return 'Grove';
