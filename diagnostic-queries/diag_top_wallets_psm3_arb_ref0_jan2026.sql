@@ -1,37 +1,37 @@
 -- =============================================================================
--- DR revenue (MONTHLY) — L2 sUSDS via PSM3, Unichain only
--- -----------------------------------------------------------------------------
--- Split from dr_rewards_monthly_psm3.sql (query_7646378) which timed out when
--- covering all 4 L2 chains in a single execution. Each chain runs as a separate
--- query so the per-query data volume fits within Dune's execution limit.
---
--- Grain: (month, blockchain, token, ref_code).
--- Untagged sUSDS -> 99 (mirrors query_5310067).
--- ref_code 0 (PSM3 default no-referral, Category C) is SPLIT for sUSDS:
---   * held by a known smart contract (ALM / sUSDC vault / PSM)
---     -> 10001  (Smart Contract-Held L2 sUSDS)
---   * any other default-0 swap                  -> 10000  (default PSM3 Swap)
--- See queries/ref_code_0_sources.md and the address dictionary in compare-dr.ts.
--- PERF: idle-day fill is capped at last-tx-day for users with ~0 final balance.
---
--- SAVED AS: query_7647199  (https://dune.com/queries/7647199)
+-- DIAGNOSTIC — top 20 wallets by Jan-2026 TWA balance, PSM3 Arbitrum, ref_code = 0
 -- =============================================================================
+-- Inlines the full PSM3 Arbitrum TWA calculation (same logic as
+-- dr_rewards_monthly_psm3_arbitrum.sql / query_7647197), extended to keep
+-- per-wallet grain. The scan is capped at 2026-02-01 and the idle-day
+-- calendar is capped at 2026-01-31 so we don't generate forward-fill rows
+-- all the way to current_date for still-active users.
+--
+-- Only ref_code = 0 (Category C — PSM3 default no-referral) rows are kept.
+-- DR rate / conversion joins are omitted: avg_twa_balance_susds (in sUSDS
+-- shares) is sufficient to rank wallets by expected payout.
+--
+-- Token / PSM3 addresses (arbitrum, from twa_susds_psm3_l2.sql):
+--   PSM3  : 0x2B05F8e1cACC6974fD79A673a341Fe1f58d27266
+--   sUSDS : 0xdDb46999F8891663a8F2828d25298f70416d7610
+-- =============================================================================
+
 with
-    psm3_addr  as (select 0x7b42Ed932f26509465F7cE3FAF76FfCe1275312f as addr),
-    token_addr as (select 0xA06b10Db9F390990364A3984C04FaDf1c13691b5 as addr),
+    psm3_addr  as (select 0x2B05F8e1cACC6974fD79A673a341Fe1f58d27266 as addr),
+    token_addr as (select 0xdDb46999F8891663a8F2828d25298f70416d7610 as addr),
 
     raw_referral_events as (
         select s.evt_block_number, s.evt_tx_hash, s.evt_index,
                s.receiver as user_addr,
                cast(s.referralCode as bigint) as ref_code
-        from spark_protocol_unichain.psm3_evt_swap s
+        from spark_protocol_arbitrum.psm3_evt_swap s
         cross join psm3_addr pa
         cross join token_addr ta
         where s.contract_address = pa.addr
           and s.assetOut = ta.addr
           and s.referralCode < 1000000000
           and s.evt_block_time >= date '2024-09-01'
-          and s.evt_block_time < timestamp '{{end_date}}'
+          and s.evt_block_time  < timestamp '2026-02-01'
     ),
 
     latest_referral_per_tx as (
@@ -52,26 +52,26 @@ with
                tr."to" as user_addr,
                cast(tr.value as double) / 1e18 as amount_change,
                lr.ref_code
-        from erc20_unichain.evt_Transfer tr
+        from erc20_arbitrum.evt_Transfer tr
         cross join token_addr ta
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
         where tr.contract_address = ta.addr
           and date(tr.evt_block_time) >= date '2024-09-01'
-          and tr.evt_block_time < timestamp '{{end_date}}'
+          and tr.evt_block_time < timestamp '2026-02-01'
           and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         select tr.evt_block_time, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
                tr."from",
                -cast(tr.value as double) / 1e18,
                lr.ref_code
-        from erc20_unichain.evt_Transfer tr
+        from erc20_arbitrum.evt_Transfer tr
         cross join token_addr ta
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."from" = lr.user_addr
         where tr.contract_address = ta.addr
           and date(tr.evt_block_time) >= date '2024-09-01'
-          and tr.evt_block_time < timestamp '{{end_date}}'
+          and tr.evt_block_time < timestamp '2026-02-01'
           and tr."from" != 0x0000000000000000000000000000000000000000
     ),
 
@@ -146,9 +146,17 @@ with
     ),
 
     user_date_ranges as (
+        -- Cap last_dt at 2026-01-31: we only need January, and the production
+        -- query would otherwise extend to current_date for active users (expensive).
         select deb.user_addr,
                min(deb.dt) as first_dt,
-               case when ufb.final_balance > 1e-9 then greatest(max(deb.dt), current_date) else max(deb.dt) end as last_dt
+               least(
+                   case when ufb.final_balance > 1e-9
+                        then greatest(max(deb.dt), date '2026-01-31')
+                        else max(deb.dt)
+                   end,
+                   date '2026-01-31'
+               ) as last_dt
         from daily_end_balances deb
         join user_final_balance ufb on deb.user_addr = ufb.user_addr
         group by deb.user_addr, ufb.final_balance
@@ -177,44 +185,25 @@ with
         left join daily_end_balances deb on c.user_addr = deb.user_addr and c.dt = deb.dt
     ),
 
-    balances as (
-        select dt,
-               'unichain' as blockchain,
-               'sUSDS' as token,
-               case
-                   when ref_code = -999999 then 99
-                   when ref_code = 0 and user_addr in (
-                       0x345E368fcCd62266B3f5F37C9a131FD1c39f5869, -- alm
-                       0x14d9143BEcC348920b68D123687045db49a016C6, -- sUSDC vault
-                       0x7b42Ed932f26509465F7cE3FAF76FfCe1275312f  -- psm
-                   ) then 10001
-                   when ref_code = 0 then 10000
-                   else ref_code
-               end as ref_code,
-               sum(twa_balance) as amount
-        from twa_daily where twa_balance > 0
-        group by 1, 3, 4
-    ),
-
-    accrued as (
-        select b.dt, b.blockchain, b.token, b.ref_code, b.amount,
-               b.amount / 365.0 * r.reward_per as tw_reward
-        from balances b
-        join query_7640322 r on r.reward_code = 'XR' and b.dt between r.start_dt and r.end_dt
-    ),
-
-    daily_usd as (
-        select a.dt, a.blockchain, a.token, a.ref_code, a.amount,
-               a.tw_reward * coalesce(cs.susds_conversion_rate, 1) as tw_reward_usd
-        from accrued a
-        left join query_7640323 cs on a.dt = cs.dt
+    -- January 2026, ref_code = 0 only, per-wallet daily TWA
+    jan_ref0 as (
+        select user_addr,
+               case when ref_code = -999999 then 99 else ref_code end as ref_code,
+               twa_balance
+        from twa_daily
+        where dt >= date '2026-01-01'
+          and dt <  date '2026-02-01'
+          and twa_balance > 0
+          and (case when ref_code = -999999 then 99 else ref_code end) = 0
     )
 
 select
-    date_trunc('month', dt) as month,
-    blockchain, token, ref_code,
-    sum(tw_reward_usd) as dr_usd,
-    avg(amount) as avg_twa_balance
-from daily_usd
-group by 1, 2, 3, 4
-order by month, ref_code
+    user_addr,
+    0                           as ref_code,
+    avg(twa_balance)            as avg_twa_balance_susds,
+    sum(twa_balance)            as sum_twa_days_susds,
+    count(*)                    as days_tagged_ref0_in_jan
+from jan_ref0
+group by user_addr
+order by avg_twa_balance_susds desc
+limit 20;

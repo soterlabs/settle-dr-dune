@@ -8,6 +8,8 @@
  *   current-year cumulative total per code, and a per-group subtotal. No notes.
  * "Soter by Ref Code Token" — verbatim copy of the latest combined
  *   dr_monthly_by_refcode_token.csv.
+ * "L2 sUSDS Filtered Addresses" — smart-contract holders whose PSM3 default ref_code-0
+ *   sUSDS is retagged to synthetic code 10001 (Smart Contract-Held L2 sUSDS).
  *
  * Data tabs (same column format — ref_code | YYYY-MM… | total | notes):
  *   "Soter by Ref Code" — latest dune-results/combined/<TS>/dr_monthly_by_refcode_token.csv
@@ -65,7 +67,7 @@ function parseMonthCol(col: string): string | null {
  */
 const NOTES: Record<string, string> = {
   '-999999': 'Synthetic code: Untagged USDS-CLE, USDS-SKY, USDS-SPK, stUSDS.',
-  '0':  'Methodology needs review. Results in agreement with other parties, but swaps using default ref code may be incorrectly applied.',
+  '0':  'Explicit on-chain referral on Ethereum. L2 sUSDS is split out to 10000/10001 in the PSM3 queries.',
   '99':  'Synthetic code: Untagged sUSDS.',
   '126':  'Subproxy holdings, no DR applied. Handled in Supply Side MSC.',
   '127':  'Synthetic code: untagged sUSDC',
@@ -81,11 +83,40 @@ const NOTES: Record<string, string> = {
   '4001': 'Synthetic code: USDS in Solana OFT Bridge (0x1e1D42781FC170EF9da004Fb735f56F0276d01B8). No on-chain Referral event; entire contract balance attributed. XR rate.',
   '4011': 'Included in aggregators, needs methodology update. 1inch',
   '9001': 'Synthetic code: USDS in Aave aEthUSDS (0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259). No on-chain Referral event; entire contract balance attributed. XR rate.',
+  '10000': 'Synthetic code: L2 sUSDS tagged by default PSM3 Swap events (Category C, ref_code 0 with no referral supplied). Split out from ref_code 0.',
+  '10001': 'Synthetic code: Smart Contract-Held L2 sUSDS (ALM / sUSDC vault / PSM3 / Morpho / etc.). See L2 sUSDS Filtered Addresses tab. Split out from ref_code 0.',
 };
 
 function getNote(code: string): string {
   return NOTES[code] ?? '';
 }
+
+/**
+ * L2 sUSDS smart-contract holder addresses that, when carrying PSM3 default
+ * ref_code 0, are retagged to synthetic code 10001 ("Smart Contract-Held L2
+ * sUSDS") in the dr_rewards_monthly_psm3_<chain> queries. Kept here in sync
+ * with the `user_addr in (...)` lists in those queries; surfaced as a workbook
+ * tab so consumers can see exactly which contracts feed 10001.
+ */
+const L2_SUSDS_SC_ADDRESSES: Array<{ chain: string; label: string; address: string }> = [
+  { chain: 'base',     label: 'alm',               address: '0x2917956eFF0B5eaF030abDB4EF4296DF775009cA' },
+  { chain: 'base',     label: 'sUSDC vault',       address: '0x3128a0F7f0ea68E7B7c9B00AFa7E41045828e858' },
+  { chain: 'base',     label: 'psm',               address: '0x1601843c5E9bC251A3272907010AFa41Fa18347E' },
+  { chain: 'base',     label: 'compound USDS',     address: '0x2c776041CCFe903071AF44aa147368a9c8EEA518' },
+  { chain: 'base',     label: 'parallel protocol', address: '0xC3BEF21Ea7dEB5C34CF33E918c8e28972C8048eD' },
+  { chain: 'base',     label: 'ExtraX Base USDS',  address: '0x1647D5950dee7332f748b5D02ff4aBE7ddcAff6b' },
+  { chain: 'arbitrum', label: 'alm',               address: '0x92afd6F2385a90e44da3a8B60fe36f6cBe1D8709' },
+  { chain: 'arbitrum', label: 'sUSDC vault',       address: '0x940098b108fB7D0a7E374f6eDED7760787464609' },
+  { chain: 'arbitrum', label: 'psm3',              address: '0x2B05F8e1cACC6974fD79A673a341Fe1f58d27266' },
+  { chain: 'arbitrum', label: 'morpho',            address: '0x6c247b1F6182318877311737BaC0844bAa518F5e' },
+  { chain: 'arbitrum', label: 'fluid',             address: '0x52Aa899454998Be5b000Ad077a46Bbe360F4e497' },
+  { chain: 'optimism', label: 'alm',               address: '0x876664f0c9Ff24D1aa355Ce9f1680AE1A5bf36fB' },
+  { chain: 'optimism', label: 'sUSDC vault',       address: '0xCF9326e24EBfFBEF22ce1050007A43A3c0B6DB55' },
+  { chain: 'optimism', label: 'psm',               address: '0xe0F9978b907853F354d79188A3dEfbD41978af62' },
+  { chain: 'unichain', label: 'alm',               address: '0x345E368fcCd62266B3f5F37C9a131FD1c39f5869' },
+  { chain: 'unichain', label: 'sUSDC vault',       address: '0x14d9143BEcC348920b68D123687045db49a016C6' },
+  { chain: 'unichain', label: 'psm',               address: '0x7b42Ed932f26509465F7cE3FAF76FfCe1275312f' },
+];
 
 /** All ref_codes are aggregated across tokens; no compound keys are used. */
 function compoundKey(code: string, _token: string): string {
@@ -259,11 +290,14 @@ function buildDiffAoa(
  *   Grove   — 2000-2999
  *   Osero   — 3000-3999
  *   Keel    — 4000-4999
- *   Other   — everything else (-999999, 99, 126, out-of-range synthetics, etc.)
+ *   Other   — everything else (-999999, 99, 126, 10000/10001 untagged L2 sUSDS,
+ *             out-of-range synthetics, etc.)
  */
 function classifyGroup(code: string): string {
   const n = numericBase(code);
   if (!Number.isFinite(n)) return 'Other';
+  // Untagged/default L2 sUSDS synthetics (split from ref_code 0) → Other.
+  if (n === 10000 || n === 10001) return 'Other';
   if (n === 0 || n === 1 || (n >= 1000 && n <= 1999)) return 'Skybase';
   if (n >= 2 && n <= 999) {
     if (n === 99 || n === 126) return 'Other';
@@ -346,6 +380,19 @@ function buildRawCsvAoa(file: string): (string | number)[][] {
       return Number.isFinite(n) ? n : cell;              // numeric → number
     }),
   );
+}
+
+/**
+ * Build AOA for the "L2 sUSDS Filtered Addresses" tab: the smart-contract holder
+ * addresses whose PSM3 default ref_code-0 sUSDS is retagged to synthetic code
+ * 10001. Columns: chain | label | address | synthetic_ref_code.
+ */
+function buildAddressDictAoa(): (string | number)[][] {
+  const header: (string | number)[] = ['chain', 'label', 'address', 'synthetic_ref_code'];
+  const rows = L2_SUSDS_SC_ADDRESSES.map(
+    ({ chain, label, address }) => [chain, label, address, 10001] as (string | number)[],
+  );
+  return [header, ...rows];
 }
 
 // ─── CSV parser ───────────────────────────────────────────────────────────────
@@ -630,6 +677,10 @@ function addSheet(wb: import('xlsx').WorkBook, aoa: (string | number)[][], name:
     if (headers[i] === 'notes')      return { wch: 55 };
     if (headers[i] === 'token')      return { wch: 12 };
     if (headers[i] === 'rate_type')  return { wch: 14 };
+    if (headers[i] === 'chain')      return { wch: 10 };
+    if (headers[i] === 'label')      return { wch: 18 };
+    if (headers[i] === 'address')    return { wch: 46 };
+    if (headers[i] === 'synthetic_ref_code') return { wch: 18 };
     return { wch: 13 };
   });
   utils.book_append_sheet(wb, ws, name);
@@ -727,6 +778,7 @@ function main(): void {
     { name: 'Summary',             aoa: buildSummaryAoa(ourData,    ourMonths)                                             },
     { name: 'Soter by Ref Code',   aoa: buildAoa(ourData,           ourMonths,      allRefCodes, tokensByCode)             },
     { name: 'Soter by Ref Code Token', aoa: buildRawCsvAoa(ourFile)                                                        },
+    { name: 'L2 sUSDS Filtered Addresses',  aoa: buildAddressDictAoa()                                                              },
     { name: 'Soter Rates',         aoa: buildRatesAoa(allTokens,    ourMonths)                                             },
     { name: 'Spark',               aoa: buildAoa(sparkData,         sparkMonths)                                          },
     { name: 'Amatsu',              aoa: buildAoa(amatsuData,        amatsuMonths)                                         },

@@ -37,15 +37,17 @@ const H = { 'x-dune-api-key': KEY };
 // Re-run a window on Dune whenever its quarter needs refreshing.
 const SOURCES: { source: string; id: number }[] = [
   { source: 'susds_susdc',   id: 7646377 },
-  // psm3_base — 8 quarterly windows, union = full history
-  { source: 'psm3_base',     id: 7684981 }, // 2024-09-01 → 2024-12-01
-  { source: 'psm3_base',     id: 7684982 }, // 2024-12-01 → 2025-03-01
-  { source: 'psm3_base',     id: 7684983 }, // 2025-03-01 → 2025-06-01
-  { source: 'psm3_base',     id: 7684984 }, // 2025-06-01 → 2025-09-01
-  { source: 'psm3_base',     id: 7684985 }, // 2025-09-01 → 2025-12-01
-  { source: 'psm3_base',     id: 7684986 }, // 2025-12-01 → 2026-03-01
-  { source: 'psm3_base',     id: 7684987 }, // 2026-03-01 → 2026-06-01
-  { source: 'psm3_base',     id: 7684988 }, // 2026-06-01 → 2026-07-01
+  // psm3_base — 8 quarterly windows, union = full history.
+  // Re-created under our own account (old openmsc-owned 7684981–88 were not
+  // editable); see create-psm3-base-windows.ts for the old→new ID mapping.
+  { source: 'psm3_base',     id: 7842602 }, // 2024-09-01 → 2024-12-01
+  { source: 'psm3_base',     id: 7842603 }, // 2024-12-01 → 2025-03-01
+  { source: 'psm3_base',     id: 7842604 }, // 2025-03-01 → 2025-06-01
+  { source: 'psm3_base',     id: 7842605 }, // 2025-06-01 → 2025-09-01
+  { source: 'psm3_base',     id: 7842606 }, // 2025-09-01 → 2025-12-01
+  { source: 'psm3_base',     id: 7842607 }, // 2025-12-01 → 2026-03-01
+  { source: 'psm3_base',     id: 7842608 }, // 2026-03-01 → 2026-06-01
+  { source: 'psm3_base',     id: 7842609 }, // 2026-06-01 → 2026-07-01
   { source: 'psm3_arbitrum', id: 7647197 },
   { source: 'psm3_optimism', id: 7647198 },
   { source: 'psm3_unichain', id: 7647199 },
