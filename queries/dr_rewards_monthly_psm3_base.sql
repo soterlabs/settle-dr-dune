@@ -25,6 +25,13 @@
 --
 -- Grain: (month, blockchain, token, ref_code).
 -- Untagged sUSDS -> 99 (mirrors query_5310067).
+-- ref_code 0 (PSM3 default no-referral, Category C) is SPLIT for sUSDS:
+--   * held by a known smart contract (ALM / sUSDC vault / PSM / Compound /
+--     Parallel / ExtraX) -> 10001  (Smart Contract-Held L2 sUSDS)
+--   * any other default-0 swap          -> 10000  (default PSM3 Swap)
+-- See queries/ref_code_0_sources.md and the address dictionary in compare-dr.ts.
+-- NOTE: this split must be applied identically across ALL 8 deployed windows
+-- (query_7684981–7684988); re-run them after editing this template.
 --
 -- PARAMS:  {{start_date}}  inclusive window start (default 2024-09-01 = genesis)
 --          {{end_date}}    exclusive window end
@@ -311,7 +318,19 @@ with
         select dt,
                'base' as blockchain,
                'sUSDS' as token,
-               case when ref_code = -999999 then 99 else ref_code end as ref_code,
+               case
+                   when ref_code = -999999 then 99
+                   when ref_code = 0 and user_addr in (
+                       0x2917956eFF0B5eaF030abDB4EF4296DF775009cA, -- alm
+                       0x3128a0F7f0ea68E7B7c9B00AFa7E41045828e858, -- sUSDC vault
+                       0x1601843c5E9bC251A3272907010AFa41Fa18347E, -- psm
+                       0x2c776041CCFe903071AF44aa147368a9c8EEA518, -- compound USDS
+                       0xC3BEF21Ea7dEB5C34CF33E918c8e28972C8048eD, -- parallel protocol
+                       0x1647D5950dee7332f748b5D02ff4aBE7ddcAff6b  -- ExtraX Base USDS
+                   ) then 10001
+                   when ref_code = 0 then 10000
+                   else ref_code
+               end as ref_code,
                sum(twa_balance) as amount
         from twa_daily where twa_balance > 0
         group by 1, 3, 4

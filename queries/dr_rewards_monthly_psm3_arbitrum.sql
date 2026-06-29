@@ -7,6 +7,11 @@
 --
 -- Grain: (month, blockchain, token, ref_code).
 -- Untagged sUSDS -> 99 (mirrors query_5310067).
+-- ref_code 0 (PSM3 default no-referral, Category C) is SPLIT for sUSDS:
+--   * held by a known smart contract (ALM / sUSDC vault / PSM3 / Morpho / Fluid)
+--     -> 10001  (Smart Contract-Held L2 sUSDS)
+--   * any other default-0 swap                  -> 10000  (default PSM3 Swap)
+-- See queries/ref_code_0_sources.md and the address dictionary in compare-dr.ts.
 -- PERF: idle-day fill is capped at last-tx-day for users with ~0 final balance.
 --
 -- SAVED AS: query_7647197  (https://dune.com/queries/7647197)
@@ -176,7 +181,18 @@ with
         select dt,
                'arbitrum' as blockchain,
                'sUSDS' as token,
-               case when ref_code = -999999 then 99 else ref_code end as ref_code,
+               case
+                   when ref_code = -999999 then 99
+                   when ref_code = 0 and user_addr in (
+                       0x92afd6F2385a90e44da3a8B60fe36f6cBe1D8709, -- alm
+                       0x940098b108fB7D0a7E374f6eDED7760787464609, -- sUSDC vault
+                       0x2B05F8e1cACC6974fD79A673a341Fe1f58d27266, -- psm3
+                       0x6c247b1F6182318877311737BaC0844bAa518F5e, -- morpho
+                       0x52Aa899454998Be5b000Ad077a46Bbe360F4e497  -- fluid
+                   ) then 10001
+                   when ref_code = 0 then 10000
+                   else ref_code
+               end as ref_code,
                sum(twa_balance) as amount
         from twa_daily where twa_balance > 0
         group by 1, 3, 4
