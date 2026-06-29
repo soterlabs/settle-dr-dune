@@ -1,0 +1,209 @@
+-- =============================================================================
+-- DIAGNOSTIC — top 20 wallets by Jan-2026 TWA balance, PSM3 Arbitrum, ref_code = 0
+-- =============================================================================
+-- Inlines the full PSM3 Arbitrum TWA calculation (same logic as
+-- dr_rewards_monthly_psm3_arbitrum.sql / query_7647197), extended to keep
+-- per-wallet grain. The scan is capped at 2026-02-01 and the idle-day
+-- calendar is capped at 2026-01-31 so we don't generate forward-fill rows
+-- all the way to current_date for still-active users.
+--
+-- Only ref_code = 0 (Category C — PSM3 default no-referral) rows are kept.
+-- DR rate / conversion joins are omitted: avg_twa_balance_susds (in sUSDS
+-- shares) is sufficient to rank wallets by expected payout.
+--
+-- Token / PSM3 addresses (arbitrum, from twa_susds_psm3_l2.sql):
+--   PSM3  : 0x2B05F8e1cACC6974fD79A673a341Fe1f58d27266
+--   sUSDS : 0xdDb46999F8891663a8F2828d25298f70416d7610
+-- =============================================================================
+
+with
+    psm3_addr  as (select 0x2B05F8e1cACC6974fD79A673a341Fe1f58d27266 as addr),
+    token_addr as (select 0xdDb46999F8891663a8F2828d25298f70416d7610 as addr),
+
+    raw_referral_events as (
+        select s.evt_block_number, s.evt_tx_hash, s.evt_index,
+               s.receiver as user_addr,
+               cast(s.referralCode as bigint) as ref_code
+        from spark_protocol_arbitrum.psm3_evt_swap s
+        cross join psm3_addr pa
+        cross join token_addr ta
+        where s.contract_address = pa.addr
+          and s.assetOut = ta.addr
+          and s.referralCode < 1000000000
+          and s.evt_block_time >= date '2024-09-01'
+          and s.evt_block_time  < timestamp '2026-02-01'
+    ),
+
+    latest_referral_per_tx as (
+        select evt_tx_hash, user_addr, ref_code
+        from (
+            select evt_tx_hash, user_addr, ref_code,
+                   row_number() over (
+                       partition by evt_tx_hash, user_addr
+                       order by evt_index desc
+                   ) as rn
+            from raw_referral_events
+        ) r
+        where rn = 1
+    ),
+
+    raw_transfers as (
+        select tr.evt_block_time as ts, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
+               tr."to" as user_addr,
+               cast(tr.value as double) / 1e18 as amount_change,
+               lr.ref_code
+        from erc20_arbitrum.evt_Transfer tr
+        cross join token_addr ta
+        left join latest_referral_per_tx lr
+            on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
+        where tr.contract_address = ta.addr
+          and date(tr.evt_block_time) >= date '2024-09-01'
+          and tr.evt_block_time < timestamp '2026-02-01'
+          and tr."to" != 0x0000000000000000000000000000000000000000
+        union all
+        select tr.evt_block_time, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
+               tr."from",
+               -cast(tr.value as double) / 1e18,
+               lr.ref_code
+        from erc20_arbitrum.evt_Transfer tr
+        cross join token_addr ta
+        left join latest_referral_per_tx lr
+            on tr.evt_tx_hash = lr.evt_tx_hash and tr."from" = lr.user_addr
+        where tr.contract_address = ta.addr
+          and date(tr.evt_block_time) >= date '2024-09-01'
+          and tr.evt_block_time < timestamp '2026-02-01'
+          and tr."from" != 0x0000000000000000000000000000000000000000
+    ),
+
+    running_balances as (
+        select user_addr, date(ts) as dt, ts, evt_block_number, evt_tx_hash, evt_index,
+               sum(amount_change) over (
+                   partition by user_addr
+                   order by evt_block_number, evt_index rows unbounded preceding
+               ) as running_balance,
+               coalesce(
+                   last_value(ref_code) ignore nulls over (
+                       partition by user_addr
+                       order by evt_block_number, evt_index rows unbounded preceding
+                   ), -999999
+               ) as current_ref_code
+        from raw_transfers
+    ),
+
+    daily_end_balances as (
+        select user_addr, dt, running_balance as end_of_day_balance, current_ref_code as end_of_day_ref_code
+        from (
+            select user_addr, dt, running_balance, current_ref_code,
+                   row_number() over (partition by user_addr, dt order by evt_block_number desc, evt_index desc) as rn
+            from running_balances
+        ) t where rn = 1
+    ),
+
+    user_days as (select distinct user_addr, dt from running_balances),
+
+    daily_start_balances as (
+        select ud.user_addr, ud.dt,
+               coalesce(lag(deb.end_of_day_balance) over (partition by ud.user_addr order by ud.dt), 0) as start_of_day_balance,
+               lag(deb.end_of_day_ref_code)         over (partition by ud.user_addr order by ud.dt)    as start_of_day_ref_code
+        from user_days ud
+        left join daily_end_balances deb on ud.user_addr = deb.user_addr and ud.dt = deb.dt
+    ),
+
+    all_events as (
+        select user_addr, dt, ts, evt_block_number, evt_tx_hash, evt_index, running_balance, current_ref_code
+        from running_balances
+        union all
+        select s.user_addr, s.dt, cast(s.dt as timestamp), 0,
+               from_hex('0000000000000000000000000000000000000000000000000000000000000000'),
+               -1, s.start_of_day_balance, coalesce(s.start_of_day_ref_code, -999999)
+        from daily_start_balances s where s.start_of_day_balance is not null
+    ),
+
+    event_durations as (
+        select user_addr, dt, current_ref_code, running_balance,
+               date_diff('second', ts,
+                   coalesce(lead(ts) over (partition by user_addr, dt order by evt_block_number, evt_index),
+                            dt + interval '1' day)
+               ) as duration_seconds
+        from all_events
+        where date(ts) = dt
+    ),
+
+    segments as (
+        select user_addr, dt, current_ref_code,
+               sum(running_balance * duration_seconds) / 86400.0 as segment_twa
+        from event_durations
+        group by user_addr, dt, current_ref_code
+    ),
+
+    user_final_balance as (
+        select user_addr, end_of_day_balance as final_balance
+        from (
+            select user_addr, end_of_day_balance,
+                   row_number() over (partition by user_addr order by dt desc) as rn
+            from daily_end_balances
+        ) t where rn = 1
+    ),
+
+    user_date_ranges as (
+        -- Cap last_dt at 2026-01-31: we only need January, and the production
+        -- query would otherwise extend to current_date for active users (expensive).
+        select deb.user_addr,
+               min(deb.dt) as first_dt,
+               least(
+                   case when ufb.final_balance > 1e-9
+                        then greatest(max(deb.dt), date '2026-01-31')
+                        else max(deb.dt)
+                   end,
+                   date '2026-01-31'
+               ) as last_dt
+        from daily_end_balances deb
+        join user_final_balance ufb on deb.user_addr = ufb.user_addr
+        group by deb.user_addr, ufb.final_balance
+    ),
+
+    calendar as (
+        select u.user_addr, d.dt
+        from user_date_ranges u
+        cross join unnest(sequence(u.first_dt, u.last_dt, interval '1' day)) as d(dt)
+    ),
+
+    twa_daily as (
+        select
+            c.user_addr, c.dt,
+            coalesce(
+                s.current_ref_code,
+                last_value(deb.end_of_day_ref_code) ignore nulls over (partition by c.user_addr order by c.dt rows unbounded preceding),
+                -999999
+            ) as ref_code,
+            coalesce(
+                s.segment_twa,
+                last_value(deb.end_of_day_balance) ignore nulls over (partition by c.user_addr order by c.dt rows unbounded preceding)
+            ) as twa_balance
+        from calendar c
+        left join segments s on c.user_addr = s.user_addr and c.dt = s.dt
+        left join daily_end_balances deb on c.user_addr = deb.user_addr and c.dt = deb.dt
+    ),
+
+    -- January 2026, ref_code = 0 only, per-wallet daily TWA
+    jan_ref0 as (
+        select user_addr,
+               case when ref_code = -999999 then 99 else ref_code end as ref_code,
+               twa_balance
+        from twa_daily
+        where dt >= date '2026-01-01'
+          and dt <  date '2026-02-01'
+          and twa_balance > 0
+          and (case when ref_code = -999999 then 99 else ref_code end) = 0
+    )
+
+select
+    user_addr,
+    0                           as ref_code,
+    avg(twa_balance)            as avg_twa_balance_susds,
+    sum(twa_balance)            as sum_twa_days_susds,
+    count(*)                    as days_tagged_ref0_in_jan
+from jan_ref0
+group by user_addr
+order by avg_twa_balance_susds desc
+limit 20;
