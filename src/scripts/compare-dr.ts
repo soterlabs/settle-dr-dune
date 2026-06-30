@@ -209,16 +209,19 @@ function buildAoa(
  */
 function buildRatesAoa(tokens: string[], months: string[]): (string | number)[][] {
   // Token → rate type + 2026 APY (from rates_dr.sql schedule).
-  // XR family:       sUSDS / USDS-* → 0.5 % APY from 2026
-  // XR* family:      sUSDC / sp*    → 0.2 % APY from 2026
-  // XR-stUSDS:       stUSDS         → 0.1 % APY from 2026
+  // XR family:       sUSDS / USDS-* / sUSDC → 0.5 % APY from 2026
+  // XR* family:      sp*                    → 0.2 % APY from 2026
+  // XR-stUSDS:       stUSDS                 → 0.1 % APY from 2026
+  // sUSDC uses XR (not XR*) because the sUSDC vault holds sUSDS as its
+  // underlying — depositors earn via the sUSDS mechanism and qualify for XR.
+  // Sky Atlas: https://sky-atlas.io/#f2b3688f-e9e0-4159-9af3-0502141babab
   const RATE_MAP: Record<string, { rateType: string; apy: number; note?: string }> = {
     'sUSDS':    { rateType: 'XR',        apy: 0.005 },
     'USDS':     { rateType: 'XR',        apy: 0.005 },
     'USDS-SKY': { rateType: 'XR',        apy: 0.005 },
     'USDS-SPK': { rateType: 'XR',        apy: 0.005 },
     'USDS-CLE': { rateType: 'XR',        apy: 0.005 },
-    'sUSDC':    { rateType: 'XR*',       apy: 0.002 },
+    'sUSDC':    { rateType: 'XR',        apy: 0.005 },
     'spUSDC':   { rateType: 'XR*',       apy: 0.002 },
     'spUSDT':   { rateType: 'XR*',       apy: 0.002 },
     'spPYUSD':  { rateType: 'XR*',       apy: 0.002 },
