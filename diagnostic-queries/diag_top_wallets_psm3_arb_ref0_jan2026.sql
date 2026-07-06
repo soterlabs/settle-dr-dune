@@ -2,7 +2,7 @@
 -- DIAGNOSTIC — top 20 wallets by Jan-2026 TWA balance, PSM3 Arbitrum, ref_code = 0
 -- =============================================================================
 -- Inlines the full PSM3 Arbitrum TWA calculation (same logic as
--- dr_rewards_monthly_psm3_arbitrum.sql / query_7647197), extended to keep
+-- dr_rewards_monthly_psm3_arbitrum.sql / query_7877565), extended to keep
 -- per-wallet grain. The scan is capped at 2026-02-01 and the idle-day
 -- calendar is capped at 2026-01-31 so we don't generate forward-fill rows
 -- all the way to current_date for still-active users.

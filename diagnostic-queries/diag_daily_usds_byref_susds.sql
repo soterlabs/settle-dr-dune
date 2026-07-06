@@ -20,9 +20,9 @@
 -- DIAGNOSTIC (daily USDS base, by ref_code) — sUSDS, all chains except Base
 -- -----------------------------------------------------------------------------
 -- sUSDS lives in TWO foundational queries, so this unions both:
---   query_7640317 -> Ethereum sUSDS (symbol = 'sUSDS')
---   query_7640318 -> L2 sUSDS via PSM3 (base/arb/op/uni) — Base excluded here
--- USDS base = sum(daily TWA sUSDS shares) x sUSDS->USDS rate (query_7640323).
+--   query_7877542 -> Ethereum sUSDS (symbol = 'sUSDS')
+--   query_7877543 -> L2 sUSDS via PSM3 (base/arb/op/uni) — Base excluded here
+-- USDS base = sum(daily TWA sUSDS shares) x sUSDS->USDS rate (query_7877548).
 --
 -- CONTRACT EXCLUSIONS: protocol/vault contract addresses that would double-count
 -- the underlying positions they hold are excluded at the foundational level
@@ -44,11 +44,11 @@ with
             sum(time_weighted_avg_balance) as shares
         from (
             select dt, ref_code, time_weighted_avg_balance
-            from query_7640317
+            from query_7877542
             where symbol = 'sUSDS' and blockchain <> 'base'
             union all
             select dt, ref_code, time_weighted_avg_balance
-            from query_7640318
+            from query_7877543
             where blockchain <> 'base'
         ) u
         group by dt, ref_code
@@ -58,5 +58,5 @@ select
     b.ref_code,
     b.shares * coalesce(r.susds_conversion_rate, 1) as usds_base
 from bal b
-left join query_7640323 r on r.dt = b.dt
+left join query_7877548 r on r.dt = b.dt
 order by b.dt, b.ref_code

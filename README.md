@@ -48,22 +48,27 @@ docs/             Background analysis and project documentation
 
 ## Saved Dune query IDs
 
+> **Ownership**: the whole pipeline was re-created under the **openmsc** Dune
+> account on 2026-07-03 (`src/scripts/recreate-dune-pipeline.ts` prints the
+> old→new ID mapping). The previous account's copies still exist on Dune but
+> are no longer maintained.
+
 **Run these five monthly queries** (each is self-contained; it auto-inlines the
 foundational + helper queries it needs, so those never need to be run on their own):
 
 | File | Dune ID |
 |---|---|
-| `dr_rewards_monthly_susds_susdc.sql` | [7646377](https://dune.com/queries/7646377) |
-| `dr_rewards_monthly_psm3_base.sql` | windowed set [7684981–7684988](#base-l2-susds-psm3--windowed-set) (one per quarter; supersedes timed-out 7647196) |
-| `dr_rewards_monthly_psm3_arbitrum.sql` | [7647197](https://dune.com/queries/7647197) |
-| `dr_rewards_monthly_psm3_optimism.sql` | [7647198](https://dune.com/queries/7647198) |
-| `dr_rewards_monthly_psm3_unichain.sql` | [7647199](https://dune.com/queries/7647199) |
-| `dr_rewards_monthly_stusds.sql` | [7646379](https://dune.com/queries/7646379) |
-| `dr_rewards_monthly_farms.sql` | [7646380](https://dune.com/queries/7646380) |
-| `dr_rewards_monthly_sp.sql` | [7683760](https://dune.com/queries/7683760) |
+| `dr_rewards_monthly_susds_susdc.sql` | [7877552](https://dune.com/queries/7877552) |
+| `dr_rewards_monthly_psm3_base.sql` | windowed set [7877571–7877574, 7877576–7877579](#base-l2-susds-psm3--windowed-set) (one per quarter, 7877575 unused; supersedes timed-out 7647196) |
+| `dr_rewards_monthly_psm3_arbitrum.sql` | [7877565](https://dune.com/queries/7877565) |
+| `dr_rewards_monthly_psm3_optimism.sql` | [7877566](https://dune.com/queries/7877566) |
+| `dr_rewards_monthly_psm3_unichain.sql` | [7877568](https://dune.com/queries/7877568) |
+| `dr_rewards_monthly_stusds.sql` | [7877553](https://dune.com/queries/7877553) |
+| `dr_rewards_monthly_farms.sql` | [7877554](https://dune.com/queries/7877554) |
+| `dr_rewards_monthly_sp.sql` | [7877555](https://dune.com/queries/7877555) |
 
-Referenced (do **not** run directly): foundational `twa_*` = 7640317–7640321;
-helpers `rates_dr`/`conversion_*` = 7640322–7640325. See `queries/README.md` for
+Referenced (do **not** run directly): foundational `twa_*` = 7877542–7877546;
+helpers `rates_dr`/`conversion_*` = 7877547–7877550. See `queries/README.md` for
 the full wiring table.
 
 ### How to run everything
@@ -88,7 +93,7 @@ single query combining all five sources exceeds Dune's stage limit (see
 ## sp* deployment ratio
 
 `dr_rewards_monthly_sp.sql` uses a per-day deployment ratio from the
-self-owned `deployment_ratio_sp.sql` ([query 7683727](https://dune.com/queries/7683727)),
+self-owned `deployment_ratio_sp.sql` ([query 7877551](https://dune.com/queries/7877551)),
 which reproduces `query_6398769` + `query_6619793` with no dependency on any
 opaque Spark dataset. All tokens (sUSDS, sUSDC, stUSDS, USDS farms, sp\*) are
 now fully transparent end-to-end.
@@ -106,14 +111,14 @@ is the parameterized template each window is baked from.
 
 | Quarter | Dune query |
 |---|---|
-| 2024-09-01 → 2024-12-01 | [7684981](https://dune.com/queries/7684981) |
-| 2024-12-01 → 2025-03-01 | [7684982](https://dune.com/queries/7684982) |
-| 2025-03-01 → 2025-06-01 | [7684983](https://dune.com/queries/7684983) |
-| 2025-06-01 → 2025-09-01 | [7684984](https://dune.com/queries/7684984) |
-| 2025-09-01 → 2025-12-01 | [7684985](https://dune.com/queries/7684985) |
-| 2025-12-01 → 2026-03-01 | [7684986](https://dune.com/queries/7684986) |
-| 2026-03-01 → 2026-06-01 | [7684987](https://dune.com/queries/7684987) |
-| 2026-06-01 → 2026-07-01 | [7684988](https://dune.com/queries/7684988) |
+| 2024-09-01 → 2024-12-01 | [7877571](https://dune.com/queries/7877571) |
+| 2024-12-01 → 2025-03-01 | [7877572](https://dune.com/queries/7877572) |
+| 2025-03-01 → 2025-06-01 | [7877573](https://dune.com/queries/7877573) |
+| 2025-06-01 → 2025-09-01 | [7877574](https://dune.com/queries/7877574) |
+| 2025-09-01 → 2025-12-01 | [7877576](https://dune.com/queries/7877576) |
+| 2025-12-01 → 2026-03-01 | [7877577](https://dune.com/queries/7877577) |
+| 2026-03-01 → 2026-06-01 | [7877578](https://dune.com/queries/7877578) |
+| 2026-06-01 → 2026-07-01 | [7877579](https://dune.com/queries/7877579) |
 
 All eight windows are wired into `combine-dr-results.ts` as `psm3_base` sources.
 Re-run only the affected quarter(s) on Dune when fresh data is needed; the
@@ -124,5 +129,5 @@ combine script fetches stored results for free.
 ## Environment
 
 ```
-DUNE_API_KEY=<key that owns query IDs 7640317–7640327>
+DUNE_API_KEY=<key from the openmsc account, which owns the pipeline queries 7877542–7877579>
 ```

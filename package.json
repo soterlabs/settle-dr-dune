@@ -9,7 +9,8 @@
     "save-queries": "tsx src/scripts/save-dune-queries.ts",
     "run-query": "tsx src/scripts/run-dune-query.ts",
     "combine": "tsx src/scripts/combine-dr-results.ts",
-    "compare": "tsx src/scripts/compare-dr.ts"
+    "compare": "tsx src/scripts/compare-dr.ts",
+    "regenerate": "tsx src/scripts/regenerate-dr-comparison.ts"
   },
   "keywords": [],
   "author": "",

@@ -19,9 +19,9 @@
 -- =============================================================================
 -- DIAGNOSTIC (daily USDS base, by ref_code) — sUSDC, all chains except Base
 -- -----------------------------------------------------------------------------
--- Source: query_7640317 filtered to symbol = 'sUSDC' (Ethereum + L2 sUSDC),
+-- Source: query_7877542 filtered to symbol = 'sUSDC' (Ethereum + L2 sUSDC),
 -- Base excluded. sUSDC has no independent rate in Spark's pipeline, so it is
--- priced with the sUSDS conversion rate (query_7640323).
+-- priced with the sUSDS conversion rate (query_7877548).
 -- USDS base = sum(daily TWA sUSDC shares) x sUSDS->USDS rate.
 --
 -- Output: dt, ref_code, usds_base   (one row per day per ref_code)
@@ -33,7 +33,7 @@ with
             -- sUSDC untagged -> 127 (see bold header note; mirrors Spark query_5310067).
             case when ref_code = -999999 then 127 else ref_code end as ref_code,
             sum(time_weighted_avg_balance) as shares
-        from query_7640317
+        from query_7877542
         where symbol = 'sUSDC' and blockchain <> 'base'
         group by dt, ref_code
     )
@@ -42,5 +42,5 @@ select
     b.ref_code,
     b.shares * coalesce(r.susds_conversion_rate, 1) as usds_base
 from bal b
-left join query_7640323 r on r.dt = b.dt
+left join query_7877548 r on r.dt = b.dt
 order by b.dt, b.ref_code

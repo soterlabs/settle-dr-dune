@@ -148,7 +148,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'ethereum'
-        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."to" != 0x0000000000000000000000000000000000000000
+        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01') and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         -- sUSDS ethereum (CONFIRMED) -- outgoing
         select 'ethereum', tt.token_addr, tr.evt_block_time, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
@@ -160,7 +160,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."from" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'ethereum'
-        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."from" != 0x0000000000000000000000000000000000000000
+        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01') and tr."from" != 0x0000000000000000000000000000000000000000
 
         union all
         -- sUSDC ethereum -- incoming
@@ -173,7 +173,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'ethereum'
-        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."to" != 0x0000000000000000000000000000000000000000
+        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01') and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         -- sUSDC ethereum -- outgoing
         select 'ethereum', tt.token_addr, tr.evt_block_time, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
@@ -185,7 +185,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."from" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'ethereum'
-        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."from" != 0x0000000000000000000000000000000000000000
+        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01') and tr."from" != 0x0000000000000000000000000000000000000000
 
         union all
         -- sUSDC base -- incoming
@@ -198,7 +198,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'base'
-        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."to" != 0x0000000000000000000000000000000000000000
+        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01') and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         -- sUSDC base -- outgoing
         select 'base', tt.token_addr, tr.evt_block_time, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
@@ -210,7 +210,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."from" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'base'
-        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."from" != 0x0000000000000000000000000000000000000000
+        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01') and tr."from" != 0x0000000000000000000000000000000000000000
 
         union all
         -- sUSDC arbitrum -- incoming
@@ -223,7 +223,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'arbitrum'
-        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."to" != 0x0000000000000000000000000000000000000000
+        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01') and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         -- sUSDC arbitrum -- outgoing
         select 'arbitrum', tt.token_addr, tr.evt_block_time, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
@@ -235,7 +235,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."from" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'arbitrum'
-        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."from" != 0x0000000000000000000000000000000000000000
+        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01') and tr."from" != 0x0000000000000000000000000000000000000000
 
         union all
         -- sUSDC optimism -- incoming
@@ -248,7 +248,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'optimism'
-        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."to" != 0x0000000000000000000000000000000000000000
+        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01') and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         -- sUSDC optimism -- outgoing
         select 'optimism', tt.token_addr, tr.evt_block_time, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
@@ -260,7 +260,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."from" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'optimism'
-        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."from" != 0x0000000000000000000000000000000000000000
+        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01') and tr."from" != 0x0000000000000000000000000000000000000000
 
         union all
         -- sUSDC unichain -- incoming
@@ -273,7 +273,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'unichain'
-        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."to" != 0x0000000000000000000000000000000000000000
+        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01') and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         -- sUSDC unichain -- outgoing
         select 'unichain', tt.token_addr, tr.evt_block_time, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
@@ -285,7 +285,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."from" = lr.user_addr
             and tr.contract_address = lr.contract_address and lr.blockchain = 'unichain'
-        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."from" != 0x0000000000000000000000000000000000000000
+        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01') and tr."from" != 0x0000000000000000000000000000000000000000
     ),
 
     -- =========================================================================
@@ -410,7 +410,7 @@ with
         select deb.blockchain, deb.contract_address, deb.user_addr,
                min(deb.dt) as first_transaction_date,
                case when ufb.final_balance > 1e-9
-                    then greatest(max(deb.dt), current_date)
+                    then greatest(max(deb.dt), least(current_date, date '2026-06-30'))
                     else max(deb.dt) end as last_transaction_date
         from daily_end_balances deb
         join user_final_balance ufb

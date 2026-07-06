@@ -21,7 +21,7 @@ with
     ),
 
     date_constants as (
-        select date '2025-10-01' as start_date, current_date as end_date
+        select date '2025-10-01' as start_date, least(current_date, date '2026-06-30') as end_date
     ),
 
     spark_vault_realtime_rates_raw as (

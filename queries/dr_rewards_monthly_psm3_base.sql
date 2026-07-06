@@ -31,13 +31,13 @@
 --   * any other default-0 swap          -> 10000  (default PSM3 Swap)
 -- See queries/ref_code_0_sources.md and the address dictionary in compare-dr.ts.
 -- NOTE: this split must be applied identically across ALL 8 deployed windows
--- (query_7684981–7684988); re-run them after editing this template.
+-- (query IDs 7877571–7877574, 7877576–7877579); re-run them after editing this template.
 --
 -- PARAMS:  {{start_date}}  inclusive window start (default 2024-09-01 = genesis)
 --          {{end_date}}    exclusive window end
 --
 -- DEPLOYED AS: a set of public quarterly windows with dates baked in, query IDs
--- 7684981–7684988 (one per calendar quarter from 2024-09; see queries/README.md
+-- 7877571–7877574 and 7877576–7877579 (one per calendar quarter from 2024-09; see queries/README.md
 -- for the window→URL table). Their union reproduces the full coverage of the
 -- original query_7647196, which holds the un-windowed SQL that always times out
 -- (owned by a different account). This file is the parameterized template each
@@ -340,14 +340,14 @@ with
         select b.dt, b.blockchain, b.token, b.ref_code, b.amount,
                b.amount / 365.0 * r.reward_per as tw_reward
         from balances b
-        join query_7640322 r on r.reward_code = 'XR' and b.dt between r.start_dt and r.end_dt
+        join query_7877547 r on r.reward_code = 'XR' and b.dt between r.start_dt and r.end_dt
     ),
 
     daily_usd as (
         select a.dt, a.blockchain, a.token, a.ref_code, a.amount,
                a.tw_reward * coalesce(cs.susds_conversion_rate, 1) as tw_reward_usd
         from accrued a
-        left join query_7640323 cs on a.dt = cs.dt
+        left join query_7877548 cs on a.dt = cs.dt
     )
 
 select

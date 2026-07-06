@@ -52,7 +52,7 @@ The five `twa_*.sql` queries above are Layer 0/1 (per-user daily TWA **balance**
 | [`conversion_sp_vaults.sql`](conversion_sp_vaults.sql) | 3b | sp\* share→USD (spETH × WETH price) | `query_5357785` |
 | [`deployment_ratio_sp.sql`](deployment_ratio_sp.sql) | 3b | sp\* vault deployment ratio `(deployed/total)` per day | `query_6398769` + `query_6619793` |
 | [`dr_rewards_monthly_susds_susdc.sql`](dr_rewards_monthly_susds_susdc.sql) | 2+3 | sUSDS/sUSDC → monthly `dr_usd` | `xr-ar-rewards-daily-raw.txt` |
-| [`dr_rewards_monthly_psm3_base.sql`](dr_rewards_monthly_psm3_base.sql) | 2+3 | L2 sUSDS (PSM3, Base) → monthly `dr_usd` — **windowed** template, deployed as a set of public quarterly queries (7684981–7684988) | " |
+| [`dr_rewards_monthly_psm3_base.sql`](dr_rewards_monthly_psm3_base.sql) | 2+3 | L2 sUSDS (PSM3, Base) → monthly `dr_usd` — **windowed** template, deployed as a set of public quarterly queries (7877571–7877574, 7877576–7877579) | " |
 | [`dr_rewards_monthly_psm3_arbitrum.sql`](dr_rewards_monthly_psm3_arbitrum.sql) | 2+3 | L2 sUSDS (PSM3, Arbitrum) → monthly `dr_usd` | " |
 | [`dr_rewards_monthly_psm3_optimism.sql`](dr_rewards_monthly_psm3_optimism.sql) | 2+3 | L2 sUSDS (PSM3, Optimism) → monthly `dr_usd` | " |
 | [`dr_rewards_monthly_psm3_unichain.sql`](dr_rewards_monthly_psm3_unichain.sql) | 2+3 | L2 sUSDS (PSM3, Unichain) → monthly `dr_usd` | " |
@@ -83,7 +83,7 @@ five small outputs **client-side** via
 
 ### Known placeholders / not-yet-implemented
 
-- **sp\* deployment ratio** is now computed per-day from self-owned sources in `deployment_ratio_sp.sql` ([query 7683727](https://dune.com/queries/7683727)). No remaining placeholders — `dr_rewards_monthly_sp.sql` references it directly. Everything is now fully transparent end-to-end.
+- **sp\* deployment ratio** is now computed per-day from self-owned sources in `deployment_ratio_sp.sql` ([query 7877551](https://dune.com/queries/7877551)). No remaining placeholders — `dr_rewards_monthly_sp.sql` references it directly. Everything is now fully transparent end-to-end.
 
 ### Wiring (saved Dune query IDs)
 
@@ -94,29 +94,29 @@ The monthly queries reference the foundational + helper queries by Dune query ID
 
 | File | Saved Dune query ID |
 |---|---|
-| `twa_susds_susdc_erc4626.sql` | [7640317](https://dune.com/queries/7640317) |
-| `twa_susds_psm3_l2.sql` | [7640318](https://dune.com/queries/7640318) |
-| `twa_stusds.sql` | [7640319](https://dune.com/queries/7640319) |
-| `twa_usds_staking_farms.sql` | [7640320](https://dune.com/queries/7640320) |
-| `twa_sp_vaults.sql` | [7640321](https://dune.com/queries/7640321) |
-| `rates_dr.sql` | [7640322](https://dune.com/queries/7640322) |
-| `conversion_susds.sql` | [7640323](https://dune.com/queries/7640323) |
-| `conversion_stusds.sql` | [7640324](https://dune.com/queries/7640324) |
-| `conversion_sp_vaults.sql` | [7640325](https://dune.com/queries/7640325) |
-| `deployment_ratio_sp.sql` | [7683727](https://dune.com/queries/7683727) |
+| `twa_susds_susdc_erc4626.sql` | [7877542](https://dune.com/queries/7877542) |
+| `twa_susds_psm3_l2.sql` | [7877543](https://dune.com/queries/7877543) |
+| `twa_stusds.sql` | [7877544](https://dune.com/queries/7877544) |
+| `twa_usds_staking_farms.sql` | [7877545](https://dune.com/queries/7877545) |
+| `twa_sp_vaults.sql` | [7877546](https://dune.com/queries/7877546) |
+| `rates_dr.sql` | [7877547](https://dune.com/queries/7877547) |
+| `conversion_susds.sql` | [7877548](https://dune.com/queries/7877548) |
+| `conversion_stusds.sql` | [7877549](https://dune.com/queries/7877549) |
+| `conversion_sp_vaults.sql` | [7877550](https://dune.com/queries/7877550) |
+| `deployment_ratio_sp.sql` | [7877551](https://dune.com/queries/7877551) |
 
 **Monthly revenue (Layer 2+3) — these are the ones you RUN:**
 
 | File | Saved Dune query ID | References |
 |---|---|---|
-| `dr_rewards_monthly_susds_susdc.sql` | [7646377](https://dune.com/queries/7646377) | 7640317, 7640322, 7640323 |
-| `dr_rewards_monthly_psm3_base.sql` | windowed set **7684981–7684988** (one per quarter) | **Windowed** template (`{{start_date}}`/`{{end_date}}`) deployed as 8 public quarterly queries; union = full coverage, replacing timed-out 7647196. See the table in the top-level README. inline + 7640322, 7640323 |
-| `dr_rewards_monthly_psm3_arbitrum.sql` | [7647197](https://dune.com/queries/7647197) | inline + 7640322, 7640323 |
-| `dr_rewards_monthly_psm3_optimism.sql` | [7647198](https://dune.com/queries/7647198) | inline + 7640322, 7640323 |
-| `dr_rewards_monthly_psm3_unichain.sql` | [7647199](https://dune.com/queries/7647199) | inline + 7640322, 7640323 |
-| `dr_rewards_monthly_stusds.sql` | [7646379](https://dune.com/queries/7646379) | 7640319, 7640322, 7640324 |
-| `dr_rewards_monthly_farms.sql` | [7646380](https://dune.com/queries/7646380) | 7640320, 7640322 |
-| `dr_rewards_monthly_sp.sql` | [7683760](https://dune.com/queries/7683760) | 7640321, 7640322, 7640325, 7683727 |
+| `dr_rewards_monthly_susds_susdc.sql` | [7877552](https://dune.com/queries/7877552) | 7877542, 7877547, 7877548 |
+| `dr_rewards_monthly_psm3_base.sql` | windowed set **7877571–7877574, 7877576–7877579** (one per quarter; 7877575 unused) | **Windowed** template (`{{start_date}}`/`{{end_date}}`) deployed as 8 public quarterly queries; union = full coverage, replacing timed-out 7647196. See the table in the top-level README. inline + 7877547, 7877548 |
+| `dr_rewards_monthly_psm3_arbitrum.sql` | [7877565](https://dune.com/queries/7877565) | inline + 7877547, 7877548 |
+| `dr_rewards_monthly_psm3_optimism.sql` | [7877566](https://dune.com/queries/7877566) | inline + 7877547, 7877548 |
+| `dr_rewards_monthly_psm3_unichain.sql` | [7877568](https://dune.com/queries/7877568) | inline + 7877547, 7877548 |
+| `dr_rewards_monthly_stusds.sql` | [7877553](https://dune.com/queries/7877553) | 7877544, 7877547, 7877549 |
+| `dr_rewards_monthly_farms.sql` | [7877554](https://dune.com/queries/7877554) | 7877545, 7877547 |
+| `dr_rewards_monthly_sp.sql` | [7877555](https://dune.com/queries/7877555) | 7877546, 7877547, 7877550, 7877551 |
 
 The cross-asset per-`ref_code` rollup is produced by
 [`src/scripts/combine-dr-results.ts`](../src/scripts/combine-dr-results.ts), which

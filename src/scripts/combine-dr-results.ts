@@ -25,6 +25,7 @@
 import 'dotenv/config';
 import * as fs from 'fs';
 import * as path from 'path';
+import { SETTLE_MONTH, settleEndExclusive } from './settlement.js';
 
 const API = 'https://api.dune.com/api/v1';
 const KEY = process.env.DUNE_API_KEY;
@@ -35,31 +36,35 @@ const H = { 'x-dune-api-key': KEY };
 // Base PSM3 is covered by 8 non-overlapping quarterly windows whose union gives
 // full-history coverage (original single query 7647196 always timed out).
 // Re-run a window on Dune whenever its quarter needs refreshing.
-const SOURCES: { source: string; id: number }[] = [
-  { source: 'susds_susdc',   id: 7646377 },
-  // psm3_base — 8 quarterly windows, union = full history.
-  // Re-created under our own account (old openmsc-owned 7684981–88 were not
-  // editable); see create-psm3-base-windows.ts for the old→new ID mapping.
-  { source: 'psm3_base',     id: 7842602 }, // 2024-09-01 → 2024-12-01
-  { source: 'psm3_base',     id: 7842603 }, // 2024-12-01 → 2025-03-01
-  { source: 'psm3_base',     id: 7842604 }, // 2025-03-01 → 2025-06-01
-  { source: 'psm3_base',     id: 7842605 }, // 2025-06-01 → 2025-09-01
-  { source: 'psm3_base',     id: 7842606 }, // 2025-09-01 → 2025-12-01
-  { source: 'psm3_base',     id: 7842607 }, // 2025-12-01 → 2026-03-01
-  { source: 'psm3_base',     id: 7842608 }, // 2026-03-01 → 2026-06-01
-  { source: 'psm3_base',     id: 7842609 }, // 2026-06-01 → 2026-07-01
-  { source: 'psm3_arbitrum', id: 7647197 },
-  { source: 'psm3_optimism', id: 7647198 },
-  { source: 'psm3_unichain', id: 7647199 },
-  { source: 'stusds',        id: 7646379 },
-  { source: 'farms',         id: 7646380 },
-  { source: 'sp',            id: 7683760 },
+const SOURCES: { source: string; id: number; window?: { start: string; end: string } }[] = [
+  { source: 'susds_susdc',   id: 7877552 },
+  // psm3_base — 8 quarterly windows, union = full history. `window` is the
+  // [start, end) period each query materialises: combine uses it to assert the
+  // set covers the settlement month, and to tolerate a never-executed window
+  // only when its whole period lies beyond the cutoff.
+  // Entire pipeline re-created under the openmsc account 2026-07 (the previous
+  // owner account's API key is no longer available); see
+  // recreate-dune-pipeline.ts for the old→new ID mapping.
+  { source: 'psm3_base',     id: 7877571, window: { start: '2024-09-01', end: '2024-12-01' } },
+  { source: 'psm3_base',     id: 7877572, window: { start: '2024-12-01', end: '2025-03-01' } },
+  { source: 'psm3_base',     id: 7877573, window: { start: '2025-03-01', end: '2025-06-01' } },
+  { source: 'psm3_base',     id: 7877574, window: { start: '2025-06-01', end: '2025-09-01' } },
+  { source: 'psm3_base',     id: 7877576, window: { start: '2025-09-01', end: '2025-12-01' } },
+  { source: 'psm3_base',     id: 7877577, window: { start: '2025-12-01', end: '2026-03-01' } },
+  { source: 'psm3_base',     id: 7877578, window: { start: '2026-03-01', end: '2026-06-01' } },
+  { source: 'psm3_base',     id: 7877579, window: { start: '2026-06-01', end: '2026-07-01' } },
+  { source: 'psm3_arbitrum', id: 7877565 },
+  { source: 'psm3_optimism', id: 7877566 },
+  { source: 'psm3_unichain', id: 7877568 },
+  { source: 'stusds',        id: 7877553 },
+  { source: 'farms',         id: 7877554 },
+  { source: 'sp',            id: 7877555 },
   // USDS held in Aave aEthUSDS (0x32a6268f9Ba3642Dda7892aDd74f1D34469A4259).
   // Synthetic ref_code 9001.
-  { source: 'usds_aave',     id: 7812438 },
+  { source: 'usds_aave',     id: 7877569 },
   // USDS held at in Solana OFT Bridge 0x1e1D42781FC170EF9da004Fb735f56F0276d01B8.
   // Synthetic ref_code 4001.
-  { source: 'usds_ref4001',  id: 7809596 },
+  { source: 'usds_ref4001',  id: 7877570 },
 ];
 
 // Local timestamp YYYY-MM-DD_HHMMSS — Windows-safe (no colons) and lexically
@@ -82,14 +87,26 @@ interface MonthlyRow {
   avg_twa_balance: number;
 }
 
-async function fetchLatestRows(id: number): Promise<MonthlyRow[]> {
+async function fetchLatestRows(id: number, allowMissing: boolean): Promise<MonthlyRow[]> {
   const rows: MonthlyRow[] = [];
   let offset = 0;
   const limit = 1000;
   for (;;) {
     const res = await fetch(`${API}/query/${id}/results?limit=${limit}&offset=${offset}`, { headers: H });
     if (!res.ok) {
-      throw new Error(`query ${id} results failed (${res.status}): ${await res.text()}`);
+      const body = await res.text();
+      // A never-executed query is tolerable ONLY when its data cannot touch
+      // the settled period (a Base window entirely beyond the cutoff);
+      // anywhere else a missing result means missing settlement data.
+      if (res.status === 404 && body.includes('No execution found')) {
+        if (allowMissing) {
+          console.warn(`WARNING: query ${id} has never been executed — beyond the cutoff, treating as empty`);
+          return rows;
+        }
+        throw new Error(
+          `query ${id} has never been executed but its data is inside the settlement period — run it on Dune first`);
+      }
+      throw new Error(`query ${id} results failed (${res.status}): ${body}`);
     }
     const j = await res.json() as {
       result?: { rows: MonthlyRow[] };
@@ -102,7 +119,9 @@ async function fetchLatestRows(id: number): Promise<MonthlyRow[]> {
       ...r,
       month: (r['month'] ?? r['dt']) as string,
     })) as unknown as MonthlyRow[];
-    rows.push(...batch);
+    // Settlement cutoff: drop rows after SETTLE_MONTH (the saved Dune queries
+    // may still fill balances past it, up to current_date).
+    rows.push(...batch.filter((r) => r.month && r.month.slice(0, 7) <= SETTLE_MONTH));
     if (batch.length < limit || j.next_offset == null) break;
     offset = j.next_offset;
   }
@@ -125,12 +144,26 @@ async function main() {
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
   console.log(`Run dir: ${path.relative(process.cwd(), OUT_DIR)}\n`);
 
+  // The Base PSM3 windows must jointly cover the settlement month — a missing
+  // window would silently drop a whole quarter of Base DR from the output.
+  const cutoffEnd = settleEndExclusive();
+  const baseWindowsEnd = SOURCES
+    .filter((s) => s.window)
+    .reduce((max, s) => (s.window!.end > max ? s.window!.end : max), '');
+  if (baseWindowsEnd < cutoffEnd) {
+    throw new Error(
+      `Base PSM3 windows only cover up to ${baseWindowsEnd} but the settlement month ${SETTLE_MONTH} ` +
+      `needs coverage to ${cutoffEnd}. Append a new window here (SOURCES), in ` +
+      `update-psm3-base-windows.ts and regenerate-dr-comparison.ts, and create it on Dune.`);
+  }
+
   const all: (MonthlyRow & { source: string })[] = [];
 
   // Fetch latest stored result for every source (free — no re-execution).
-  for (const { source, id } of SOURCES) {
+  for (const { source, id, window } of SOURCES) {
     process.stdout.write(`Fetching ${source} (query_${id})... `);
-    const rows = await fetchLatestRows(id);
+    const allowMissing = window !== undefined && window.start >= cutoffEnd;
+    const rows = await fetchLatestRows(id, allowMissing);
     console.log(`${rows.length} rows`);
     for (const r of rows) all.push({ ...r, source });
   }

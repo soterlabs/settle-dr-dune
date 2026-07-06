@@ -14,7 +14,7 @@
 -- See queries/ref_code_0_sources.md and the address dictionary in compare-dr.ts.
 -- PERF: idle-day fill is capped at last-tx-day for users with ~0 final balance.
 --
--- SAVED AS: query_7647199  (https://dune.com/queries/7647199)
+-- SAVED AS: query_7877568  (https://dune.com/queries/7877568)
 -- =============================================================================
 with
     psm3_addr  as (select 0x7b42Ed932f26509465F7cE3FAF76FfCe1275312f as addr),
@@ -31,7 +31,7 @@ with
           and s.assetOut = ta.addr
           and s.referralCode < 1000000000
           and s.evt_block_time >= date '2024-09-01'
-          and s.evt_block_time < timestamp '{{end_date}}'
+          and s.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01')
     ),
 
     latest_referral_per_tx as (
@@ -58,7 +58,7 @@ with
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
         where tr.contract_address = ta.addr
           and date(tr.evt_block_time) >= date '2024-09-01'
-          and tr.evt_block_time < timestamp '{{end_date}}'
+          and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01')
           and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         select tr.evt_block_time, tr.evt_block_number, tr.evt_tx_hash, tr.evt_index,
@@ -71,7 +71,7 @@ with
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."from" = lr.user_addr
         where tr.contract_address = ta.addr
           and date(tr.evt_block_time) >= date '2024-09-01'
-          and tr.evt_block_time < timestamp '{{end_date}}'
+          and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01')
           and tr."from" != 0x0000000000000000000000000000000000000000
     ),
 
@@ -148,7 +148,7 @@ with
     user_date_ranges as (
         select deb.user_addr,
                min(deb.dt) as first_dt,
-               case when ufb.final_balance > 1e-9 then greatest(max(deb.dt), current_date) else max(deb.dt) end as last_dt
+               case when ufb.final_balance > 1e-9 then greatest(max(deb.dt), least(current_date, date '2026-06-30')) else max(deb.dt) end as last_dt
         from daily_end_balances deb
         join user_final_balance ufb on deb.user_addr = ufb.user_addr
         group by deb.user_addr, ufb.final_balance
@@ -200,14 +200,14 @@ with
         select b.dt, b.blockchain, b.token, b.ref_code, b.amount,
                b.amount / 365.0 * r.reward_per as tw_reward
         from balances b
-        join query_7640322 r on r.reward_code = 'XR' and b.dt between r.start_dt and r.end_dt
+        join query_7877547 r on r.reward_code = 'XR' and b.dt between r.start_dt and r.end_dt
     ),
 
     daily_usd as (
         select a.dt, a.blockchain, a.token, a.ref_code, a.amount,
                a.tw_reward * coalesce(cs.susds_conversion_rate, 1) as tw_reward_usd
         from accrued a
-        left join query_7640323 cs on a.dt = cs.dt
+        left join query_7877548 cs on a.dt = cs.dt
     )
 
 select

@@ -6,11 +6,11 @@
 --
 -- Grain: (month, blockchain, token, ref_code).
 --
--- Pipeline: TWA balance (query_7640320) x reward rate (query_7640322, XR).
+-- Pipeline: TWA balance (query_7877545) x reward rate (query_7877547, XR).
 -- USDS farms need NO share->USD conversion (balance is already USDS, rate = 1),
 -- so there is no conversion join here. Untagged keeps the -999999 sentinel.
 --
--- SAVED AS: query_7646380  (https://dune.com/queries/7646380)
+-- SAVED AS: query_7877554  (https://dune.com/queries/7877554)
 -- =============================================================================
 with
     balances as (
@@ -20,7 +20,7 @@ with
             symbol as token,
             ref_code,
             sum(time_weighted_avg_balance) as amount
-        from query_7640320
+        from query_7877545
         group by 1, 2, 3, 4
     ),
 
@@ -29,7 +29,7 @@ with
             b.dt, b.blockchain, b.token, b.ref_code, b.amount,
             b.amount / 365.0 * r.reward_per as tw_reward
         from balances b
-        join query_7640322 r
+        join query_7877547 r
             on r.reward_code = 'XR'
             and b.dt between r.start_dt and r.end_dt
     )

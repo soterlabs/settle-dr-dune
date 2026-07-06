@@ -6,9 +6,9 @@
 -- single day to find the double-count or mis-attributed position.
 --
 -- Sources:
---   query_7640317 -> Ethereum sUSDS (symbol = 'sUSDS') + Ethereum sUSDC
---   query_7640318 -> L2 sUSDS via PSM3 (arb/op/uni; base excluded)
--- Priced with sUSDS conversion rate (query_7640323).
+--   query_7877542 -> Ethereum sUSDS (symbol = 'sUSDS') + Ethereum sUSDC
+--   query_7877543 -> L2 sUSDS via PSM3 (arb/op/uni; base excluded)
+-- Priced with sUSDS conversion rate (query_7877548).
 --
 -- Output: source, blockchain, user_addr, day_type, twa_shares, usds_base
 --         sorted by usds_base desc so the biggest contributors are first.
@@ -16,13 +16,13 @@
 with
     rate as (
         select susds_conversion_rate
-        from query_7640323
+        from query_7877548
         where dt = date '2026-06-14'
         limit 1
     ),
 
     raw as (
-        -- Ethereum sUSDS (query_7640317, symbol filter)
+        -- Ethereum sUSDS (query_7877542, symbol filter)
         select
             'susds_eth'      as source,
             blockchain,
@@ -30,7 +30,7 @@ with
             ref_code,
             day_type,
             time_weighted_avg_balance as twa_shares
-        from query_7640317
+        from query_7877542
         where symbol    = 'sUSDS'
           and blockchain <> 'base'
           and dt         = date '2026-06-14'
@@ -38,7 +38,7 @@ with
 
         union all
 
-        -- L2 sUSDS via PSM3 (query_7640318, base excluded)
+        -- L2 sUSDS via PSM3 (query_7877543, base excluded)
         select
             'susds_l2_psm3'  as source,
             blockchain,
@@ -46,7 +46,7 @@ with
             ref_code,
             day_type,
             time_weighted_avg_balance
-        from query_7640318
+        from query_7877543
         where blockchain <> 'base'
           and dt          = date '2026-06-14'
           and ref_code    = -999999
