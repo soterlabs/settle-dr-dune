@@ -12,7 +12,7 @@
 -- =============================================================================
 with
     date_constants as (
-        select date '2024-09-04' as start_date, current_date as end_date
+        select date '2024-09-04' as start_date, least(current_date, date '2026-06-30') as end_date
     ),
 
     susds_realtime_rates_raw as (

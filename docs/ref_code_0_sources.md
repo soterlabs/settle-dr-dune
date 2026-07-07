@@ -51,12 +51,12 @@ This is the common path and exists for every non-PSM3 source:
 
 | Token(s) | Referral event table | Tagged wallet | TWA query | Monthly query |
 |---|---|---|---|---|
-| sUSDS (eth) | `sky_ethereum.susds_evt_referral` | `owner` | `twa_susds_susdc_erc4626.sql` (query_7640317) | `dr_rewards_monthly_susds_susdc.sql` (7646377) |
+| sUSDS (eth) | `sky_ethereum.susds_evt_referral` | `owner` | `twa_susds_susdc_erc4626.sql` (query_7877542) | `dr_rewards_monthly_susds_susdc.sql` (7877552) |
 | sUSDC (eth) | `sky_ethereum.usdcvault_evt_referral` | `owner` | same | same |
 | sUSDC (base/arb/op/uni) | `sky_<chain>.usdcvaultl2_evt_referral` | `owner` | same | same |
-| stUSDS (eth) | `sky_ethereum.stusds_evt_referral` | `owner` | `twa_stusds.sql` (query_7640319) | `dr_rewards_monthly_stusds.sql` (7646379) |
-| USDS-SKY / USDS-SPK / USDS-CLE (eth) | `sky_ethereum.stakingrewards_evt_referral` | `user` | `twa_usds_staking_farms.sql` (query_7640320) | `dr_rewards_monthly_farms.sql` (7646380) |
-| spUSDC / spUSDT / spPYUSD / spETH (eth) + spUSDC (avax) | `spark_protocol_<chain>.sparkvault_evt_referral` | `owner` | `twa_sp_vaults.sql` (query_7640321) | `dr_rewards_monthly_sp.sql` (7683760) |
+| stUSDS (eth) | `sky_ethereum.stusds_evt_referral` | `owner` | `twa_stusds.sql` (query_7877544) | `dr_rewards_monthly_stusds.sql` (7877553) |
+| USDS-SKY / USDS-SPK / USDS-CLE (eth) | `sky_ethereum.stakingrewards_evt_referral` | `user` | `twa_usds_staking_farms.sql` (query_7877545) | `dr_rewards_monthly_farms.sql` (7877554) |
+| spUSDC / spUSDT / spPYUSD / spETH (eth) + spUSDC (avax) | `spark_protocol_<chain>.sparkvault_evt_referral` | `owner` | `twa_sp_vaults.sql` (query_7877546) | `dr_rewards_monthly_sp.sql` (7877555) |
 
 > Note: a frontend that passes `0` when the user has no referral will produce
 > Category-A `0`s for genuine end users. These are not necessarily "wrong", but
@@ -85,7 +85,7 @@ mostly-legitimate population. The `receiver` is tagged `0` and forward-filled.
 > `-999999 → 99` (untagged) is unchanged. After the split **no L2 sUSDS remains
 > under `ref_code 0`** — the only `0` sUSDS left is Ethereum Category A. This
 > applies to all four chains, INCLUDING Base (all 8 windowed queries
-> `7684981–7684988` must be re-run after the template edit).
+> `7877571–7877574`, `7877576–7877579` must be re-run after the template edit).
 
 > **In the diagnostic query: arbitrum / optimism / unichain are INCLUDED; only
 > Base is excluded.** Base's full-history per-user reconstruction is the one that
@@ -134,7 +134,7 @@ rebuilt and its numbers analyzed.
 
 ## Contract-address exclusion list (affects which `0`s survive)
 
-`twa_susds_susdc_erc4626.sql` (query_7640317) also carries an
+`twa_susds_susdc_erc4626.sql` (query_7877542) also carries an
 `excluded_addresses` CTE (lines 41–51) whose entries are **dropped from the final
 output entirely** via `and b.user_addr not in (select addr from excluded_addresses)`.
 Because they never appear, they can never carry **any** ref_code — including `0`.
@@ -149,7 +149,7 @@ underlying user positions they custody:
 | `0x00836Fe54625BE242BcFA286207795405ca4fD10` | Curve PSM |
 
 This exclusion currently lives only in the sUSDS/sUSDC foundational
-(query_7640317). The other foundationals (stUSDS, farms, sp, PSM3 L2) do **not**
+(query_7877542). The other foundationals (stUSDS, farms, sp, PSM3 L2) do **not**
 filter these addresses.
 
 ---

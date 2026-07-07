@@ -11,7 +11,7 @@
 --                          a lending market. Sourced from ERC20 Transfer events
 --                          TO/FROM the vault's own address.
 --
---   vault_total_supply   ← query_7640321 (twa_sp_vaults.sql):
+--   vault_total_supply   ← query_7877546 (twa_sp_vaults.sql):
 --                          sum of per-user daily sp* share TWA balances, aggregated
 --                          to vault level. Matches result_spark_sp_usdc_sp_usdt_
 --                          sp_eth_time_weighted_average_balance. spETH excluded.
@@ -32,7 +32,7 @@
 --                 vault_idle_holdings, vault_deployed, deployment_ratio
 -- Grain: one row per (blockchain, vault_symbol, dt). spETH excluded.
 --
--- SAVED AS: query_7683727  (https://dune.com/queries/7683727)
+-- SAVED AS: query_7877551  (https://dune.com/queries/7877551)
 -- =============================================================================
 with
     vault_tokens (blockchain, vault_symbol, vault_addr, underlying_addr, underlying_decimals, start_date) as (
@@ -190,7 +190,7 @@ with
     vault_date_ranges as (
         select blockchain, vault_symbol,
                min(dt)                      as first_dt,
-               greatest(max(dt), current_date) as last_dt
+               greatest(max(dt), least(current_date, date '2026-06-30')) as last_dt
         from daily_end_idle
         group by blockchain, vault_symbol
     ),
@@ -224,7 +224,7 @@ with
     ),
 
     -- =========================================================================
-    -- Vault total supply: our self-owned twa_sp_vaults (query_7640321) aggregated
+    -- Vault total supply: our self-owned twa_sp_vaults (query_7877546) aggregated
     -- to vault level. Matches result_spark_sp_usdc_sp_usdt_sp_eth_time_weighted_
     -- average_balance summed across users. spETH excluded.
     -- =========================================================================
@@ -233,7 +233,7 @@ with
                symbol as vault_symbol,
                dt,
                sum(time_weighted_avg_balance) as vault_total_supply
-        from query_7640321
+        from query_7877546
         where symbol != 'spETH'
         group by blockchain, symbol, dt
     )

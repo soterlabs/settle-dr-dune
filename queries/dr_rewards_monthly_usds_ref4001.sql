@@ -78,7 +78,7 @@ with
         select dt
         from unnest(sequence(
             date '2024-09-01',
-            current_date,
+            least(current_date, date '2026-06-30'),
             interval '1' day
         )) t(dt)
     ),

@@ -35,6 +35,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { createRequire } from 'node:module';
+import { SETTLE_MONTH } from './settlement.js';
+
+// Comparison covers the settlement YEAR up to the settlement month.
+const SETTLE_YEAR = SETTLE_MONTH.slice(0, 4);
 const _require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const XLSX = _require('xlsx') as typeof import('xlsx');
@@ -453,7 +457,7 @@ function loadOurData(file: string): {
 } {
   const rows = parseCsv(fs.readFileSync(file, 'utf8'));
   const headers = rows[0];
-  const months2026 = headers.filter(h => /^2026-\d{2}$/.test(h) && h <= '2026-05').sort();
+  const months2026 = headers.filter(h => /^\d{4}-\d{2}$/.test(h) && h.startsWith(`${SETTLE_YEAR}-`) && h <= SETTLE_MONTH).sort();
 
   const data: DataMap = new Map();
   const tokenSets = new Map<string, Set<string>>();
@@ -504,9 +508,9 @@ function loadSparkData(file: string): { data: DataMap; months2026: string[] } {
   for (let i = 1; i < rows.length; i++) {
     const cols = rows[i];
     const dt = cols[dtIdx]?.trim() ?? '';
-    if (!dt.startsWith('2026')) continue;
+    if (!dt.startsWith(SETTLE_YEAR)) continue;
     const month = dt.slice(0, 7);
-    if (month > '2026-05') continue;
+    if (month > SETTLE_MONTH) continue;
     monthSet.add(month);
     const code  = cols[codeIdx]?.trim() ?? '';
     const token = tokenIdx >= 0 ? (cols[tokenIdx]?.trim() ?? '') : '';
@@ -736,7 +740,7 @@ function main(): void {
   // Output is versioned into its own fresh-timestamp comparison run dir.
   const outFile = getArg('--out')
     ? path.resolve(getArg('--out')!)
-    : path.join(root, 'dune-results', 'comparison', runStamp(), 'dr_comparison_2026.xlsx');
+    : path.join(root, 'dune-results', 'comparison', runStamp(), `dr_comparison_${SETTLE_YEAR}.xlsx`);
 
   console.log(`Input (Soter): ${path.relative(root, ourFile)}`);
 

@@ -22,8 +22,8 @@
 -- =============================================================================
 -- DIAGNOSTIC (daily USDS base, by ref_code) — spUSDT (Spark vault)
 -- -----------------------------------------------------------------------------
--- Source: query_7640321 filtered to symbol = 'spUSDT' (Ethereum).
--- USDS base = sum( daily TWA spUSDT shares x share->USD value (query_7640325) )
+-- Source: query_7877546 filtered to symbol = 'spUSDT' (Ethereum).
+-- USDS base = sum( daily TWA spUSDT shares x share->USD value (query_7877550) )
 --
 -- NO DEPLOYMENT-RATIO HAIRCUT: spUSDT holds its underlying directly (no idle/
 -- deployed split), so the deployment-ratio concept does not apply — the full
@@ -41,8 +41,8 @@ select
         b.time_weighted_avg_balance
         * coalesce(csp.usd_value, 1)
     ) as usds_base
-from query_7640321 b
-left join query_7640325 csp
+from query_7877546 b
+left join query_7877550 csp
     on csp.dt = b.dt and csp.token_symbol = b.symbol and csp.blockchain = b.blockchain
 where b.symbol = 'spUSDT'
 group by 1, 2

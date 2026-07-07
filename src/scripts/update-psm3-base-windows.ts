@@ -25,14 +25,14 @@ if (!KEY) { console.error('Set DUNE_API_KEY.'); process.exit(1); }
 // Window boundaries are baked into each deployed query's name + SQL. Keep this
 // table in sync with the window→ID list in combine-dr-results.ts (SOURCES).
 const WINDOWS: { id: number; start: string; end: string }[] = [
-  { id: 7842602, start: '2024-09-01', end: '2024-12-01' },
-  { id: 7842603, start: '2024-12-01', end: '2025-03-01' },
-  { id: 7842604, start: '2025-03-01', end: '2025-06-01' },
-  { id: 7842605, start: '2025-06-01', end: '2025-09-01' },
-  { id: 7842606, start: '2025-09-01', end: '2025-12-01' },
-  { id: 7842607, start: '2025-12-01', end: '2026-03-01' },
-  { id: 7842608, start: '2026-03-01', end: '2026-06-01' },
-  { id: 7842609, start: '2026-06-01', end: '2026-07-01' },
+  { id: 7877571, start: '2024-09-01', end: '2024-12-01' },
+  { id: 7877572, start: '2024-12-01', end: '2025-03-01' },
+  { id: 7877573, start: '2025-03-01', end: '2025-06-01' },
+  { id: 7877574, start: '2025-06-01', end: '2025-09-01' },
+  { id: 7877576, start: '2025-09-01', end: '2025-12-01' },
+  { id: 7877577, start: '2025-12-01', end: '2026-03-01' },
+  { id: 7877578, start: '2026-03-01', end: '2026-06-01' },
+  { id: 7877579, start: '2026-06-01', end: '2026-07-01' },
 ];
 
 const TEMPLATE = path.resolve('queries', 'dr_rewards_monthly_psm3_base.sql');

@@ -22,10 +22,10 @@
 -- =============================================================================
 -- DIAGNOSTIC (daily USDS base, by ref_code) — spUSDC (Spark vault)
 -- -----------------------------------------------------------------------------
--- Source: query_7640321 filtered to symbol = 'spUSDC' (Ethereum + Avalanche).
+-- Source: query_7877546 filtered to symbol = 'spUSDC' (Ethereum + Avalanche).
 -- USDS base = sum( daily TWA spUSDC shares
---                  x deployment ratio (query_7683727)
---                  x share->USD value (query_7640325) )
+--                  x deployment ratio (query_7877551)
+--                  x share->USD value (query_7877550) )
 --
 -- Output: dt, ref_code, usds_base   (one row per day per ref_code)
 -- =============================================================================
@@ -38,10 +38,10 @@ select
         * coalesce(dr.deployment_ratio, 0)
         * coalesce(csp.usd_value, 1)
     ) as usds_base
-from query_7640321 b
-left join query_7683727 dr
+from query_7877546 b
+left join query_7877551 dr
     on dr.dt = b.dt and dr.blockchain = b.blockchain and dr.vault_symbol = b.symbol
-left join query_7640325 csp
+left join query_7877550 csp
     on csp.dt = b.dt and csp.token_symbol = b.symbol and csp.blockchain = b.blockchain
 where b.symbol = 'spUSDC'
 group by 1, 2

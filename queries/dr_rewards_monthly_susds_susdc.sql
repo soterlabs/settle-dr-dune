@@ -33,14 +33,14 @@
 -- Grain: (month, blockchain, token, ref_code) — directly comparable to the
 -- Amatsu per-farm monthly CSVs, and only a few thousand rows.
 --
--- Pipeline: TWA balance (query_7640317) x reward rate (query_7640322, by
--- token-class + date) x sUSDS share->USD rate (query_7640323, by dt).
+-- Pipeline: TWA balance (query_7877542) x reward rate (query_7877547, by
+-- token-class + date) x sUSDS share->USD rate (query_7877548, by dt).
 --   sUSDS -> reward_code XR ; sUSDC -> reward_code XR (boosted, same as sUSDS:
 --   sUSDC vault holds sUSDS as underlying; Sky Atlas ref f2b3688f).
 --   Both priced via the sUSDS conversion rate (Spark has no independent sUSDC
 --   rate).
 --
--- SAVED AS: query_7646377  (https://dune.com/queries/7646377)
+-- SAVED AS: query_7877552  (https://dune.com/queries/7877552)
 -- =============================================================================
 with
     balances as (
@@ -54,7 +54,7 @@ with
                 else ref_code
             end as ref_code,
             sum(time_weighted_avg_balance) as amount
-        from query_7640317
+        from query_7877542
         group by 1, 2, 3, 4
     ),
 
@@ -63,7 +63,7 @@ with
             b.dt, b.blockchain, b.token, b.ref_code, b.amount,
             b.amount / 365.0 * r.reward_per as tw_reward
         from balances b
-        join query_7640322 r
+        join query_7877547 r
             on r.reward_code = 'XR'
             and b.dt between r.start_dt and r.end_dt
     ),
@@ -73,7 +73,7 @@ with
             a.dt, a.blockchain, a.token, a.ref_code, a.amount,
             a.tw_reward * coalesce(cs.susds_conversion_rate, 1) as tw_reward_usd
         from accrued a
-        left join query_7640323 cs on a.dt = cs.dt
+        left join query_7877548 cs on a.dt = cs.dt
     )
 
 select

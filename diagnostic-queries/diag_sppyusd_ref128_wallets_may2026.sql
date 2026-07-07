@@ -8,15 +8,15 @@
 -- would be NON-zero. Both buckets being $0 at once means a MULTIPLICATIVE factor
 -- is going to zero for ALL ref codes — almost certainly the deployment ratio.
 -- usds_base = twa_shares x deployment_ratio x usd_value, and the monthly/diag
--- queries use coalesce(deployment_ratio, 0): if query_7683727 has no spPYUSD row
+-- queries use coalesce(deployment_ratio, 0): if query_7877551 has no spPYUSD row
 -- (or returns 0) after May 13, every ref bucket zeroes simultaneously while the
--- TWA shares (query_7640321) are untouched.
+-- TWA shares (query_7877546) are untouched.
 --
 -- This query decomposes the three factors per (wallet, day) so we can see WHICH
 -- one drops:
---   twa_shares       -> does the raw balance persist after May 13?  (query_7640321)
---   deployment_ratio -> prime suspect; null/0 after May 13?         (query_7683727)
---   usd_value        -> share->USD price present?                   (query_7640325)
+--   twa_shares       -> does the raw balance persist after May 13?  (query_7877546)
+--   deployment_ratio -> prime suspect; null/0 after May 13?         (query_7877551)
+--   usd_value        -> share->USD price present?                   (query_7877550)
 --   usds_base        -> the product actually charted.
 --
 -- Target wallets = any wallet that held spPYUSD under ref_code 128 during
@@ -31,7 +31,7 @@
 with
     target_wallets as (
         select distinct user_addr
-        from query_7640321
+        from query_7877546
         where symbol = 'spPYUSD'
           and ref_code = 128
           and dt >= date '2026-05-01'
@@ -48,12 +48,12 @@ select
     b.time_weighted_avg_balance
         * coalesce(dr.deployment_ratio, 0)
         * coalesce(csp.usd_value, 1)                 as usds_base
-from query_7640321 b
+from query_7877546 b
 join target_wallets w
     on b.user_addr = w.user_addr
-left join query_7683727 dr
+left join query_7877551 dr
     on dr.dt = b.dt and dr.blockchain = b.blockchain and dr.vault_symbol = b.symbol
-left join query_7640325 csp
+left join query_7877550 csp
     on csp.dt = b.dt and csp.token_symbol = b.symbol and csp.blockchain = b.blockchain
 where b.symbol = 'spPYUSD'
   and b.dt >= date '2026-05-01'

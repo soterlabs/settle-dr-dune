@@ -60,7 +60,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."to" = lr.user_addr
             and tr.contract_address = lr.contract_address and 'ethereum' = lr.blockchain
-        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."to" != 0x0000000000000000000000000000000000000000
+        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01') and tr."to" != 0x0000000000000000000000000000000000000000
         union all
         select
             'ethereum', tt.token_addr, date(tr.evt_block_time), tr.evt_block_time, tr.evt_block_number,
@@ -72,7 +72,7 @@ with
         left join latest_referral_per_tx lr
             on tr.evt_tx_hash = lr.evt_tx_hash and tr."from" = lr.user_addr
             and tr.contract_address = lr.contract_address and 'ethereum' = lr.blockchain
-        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < timestamp '{{end_date}}' and tr."from" != 0x0000000000000000000000000000000000000000
+        where date(tr.evt_block_time) >= tt.start_date and tr.evt_block_time < least(timestamp '{{end_date}}', timestamp '2026-07-01') and tr."from" != 0x0000000000000000000000000000000000000000
     ),
 
     -- =========================================================================
@@ -197,7 +197,7 @@ with
         select deb.blockchain, deb.contract_address, deb.user_addr,
                min(deb.dt) as first_transaction_date,
                case when ufb.final_balance > 1e-9
-                    then greatest(max(deb.dt), current_date)
+                    then greatest(max(deb.dt), least(current_date, date '2026-06-30'))
                     else max(deb.dt) end as last_transaction_date
         from daily_end_balances deb
         join user_final_balance ufb

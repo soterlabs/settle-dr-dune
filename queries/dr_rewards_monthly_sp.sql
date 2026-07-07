@@ -32,13 +32,13 @@
 --
 -- Grain: (month, blockchain, token, ref_code).
 --
--- Pipeline: TWA balance (query_7640321) x per-day deployment ratio
--- (query_7683727, deployment_ratio_sp.sql) x reward rate (query_7640322, XR*)
--- x sp* share->USD value (query_7640325, by dt/token/chain).
+-- Pipeline: TWA balance (query_7877546) x per-day deployment ratio
+-- (query_7877551, deployment_ratio_sp.sql) x reward rate (query_7877547, XR*)
+-- x sp* share->USD value (query_7877550, by dt/token/chain).
 -- spETH is tracked but earns ZERO rewards (zeroed here). Untagged sp* -> reserved 130-139.
 --
 -- *** DEPLOYMENT RATIO SCOPE — spUSDC ONLY ***
--- The deployment-ratio haircut (query_7683727) is applied ONLY to spUSDC. spUSDT
+-- The deployment-ratio haircut (query_7877551) is applied ONLY to spUSDC. spUSDT
 -- and spPYUSD are treated as ratio = 1 (full balance DR-eligible). Reason: those
 -- vaults hold their underlying directly and have no idle/deployed split, so the
 -- "fraction deployed elsewhere" model is meaningless for them and (because idle
@@ -49,19 +49,19 @@
 -- *** COMPARISON WARNING — Spark's spUSDC DR query (https://dune.com/queries/6357036/10113012) ***
 -- Spark's query tracks the FULL per-user spUSDC TWA balance WITHOUT subtracting the
 -- vault's undeployed (idle) USDC. It is therefore NOT the DR-eligible base; it is the
--- gross deposited balance. This query applies the deployment ratio (query_7683727) so
+-- gross deposited balance. This query applies the deployment ratio (query_7877551) so
 -- that only the fraction of USDC actually deployed into a lending market earns rewards,
 -- matching the methodology of query_6398769. Do NOT compare totals from the two queries
 -- directly — Spark's figure will always be larger by the idle-buffer amount.
 --
--- SAVED AS: query_7683760  (https://dune.com/queries/7683760)
+-- SAVED AS: query_7877555  (https://dune.com/queries/7877555)
 -- =============================================================================
 with
     -- Per-day deployment ratio: (vault_deployed / vault_total) per (blockchain, vault_symbol, dt).
-    -- Source: deployment_ratio_sp.sql (query_7683727).
+    -- Source: deployment_ratio_sp.sql (query_7877551).
     deployment_ratios as (
         select blockchain, vault_symbol, dt, deployment_ratio
-        from query_7683727
+        from query_7877551
     ),
 
     balances as (
@@ -77,7 +77,7 @@ with
                 else ref_code
             end as ref_code,
             sum(time_weighted_avg_balance) as amount
-        from query_7640321
+        from query_7877546
         group by 1, 2, 3, 4
     ),
 
@@ -97,7 +97,7 @@ with
             on b.dt          = dr.dt
            and b.blockchain   = dr.blockchain
            and b.token        = dr.vault_symbol
-        join query_7640322 r
+        join query_7877547 r
             on r.reward_code = 'XR*'
            and b.dt between r.start_dt and r.end_dt
     ),
@@ -107,7 +107,7 @@ with
             a.dt, a.blockchain, a.token, a.ref_code, a.amount,
             a.tw_reward * coalesce(csp.usd_value, 1) as tw_reward_usd
         from accrued a
-        left join query_7640325 csp
+        left join query_7877550 csp
             on a.dt = csp.dt
             and a.token = csp.token_symbol
             and a.blockchain = csp.blockchain

@@ -11,13 +11,13 @@
 --   • TWA balance computed by the per-chain PSM3 monthly queries (with the
 --     same referral forward-fill, idle-day balance fill, exclusion list, and
 --     XR-rate join as in production).
---   • sUSDS share → USDS conversion via query_7640323 (same as production).
---   • Rate table query_7640322, reward_code = 'XR' (same as production).
+--   • sUSDS share → USDS conversion via query_7877548 (same as production).
+--   • Rate table query_7877547, reward_code = 'XR' (same as production).
 --
 -- Sources (all three non-Base L2 PSM3 monthly queries):
---   query_7647197 — psm3_arbitrum (dr_rewards_monthly_psm3_arbitrum.sql)
---   query_7647198 — psm3_optimism (dr_rewards_monthly_psm3_optimism.sql)
---   query_7647199 — psm3_unichain (dr_rewards_monthly_psm3_unichain.sql)
+--   query_7877565 — psm3_arbitrum (dr_rewards_monthly_psm3_arbitrum.sql)
+--   query_7877566 — psm3_optimism (dr_rewards_monthly_psm3_optimism.sql)
+--   query_7877568 — psm3_unichain (dr_rewards_monthly_psm3_unichain.sql)
 --
 -- Base is intentionally excluded: its full-history per-user reconstruction
 -- times out and is served as 8 windowed quarterly queries in production
@@ -32,15 +32,15 @@ with
     psm3_l2_all as (
         -- arbitrum
         select month, blockchain, token, ref_code, dr_usd, avg_twa_balance
-        from query_7647197
+        from query_7877565
         union all
         -- optimism
         select month, blockchain, token, ref_code, dr_usd, avg_twa_balance
-        from query_7647198
+        from query_7877566
         union all
         -- unichain
         select month, blockchain, token, ref_code, dr_usd, avg_twa_balance
-        from query_7647199
+        from query_7877568
     ),
 
     ref0_only as (

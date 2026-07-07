@@ -19,19 +19,29 @@ if (!KEY) { console.error('Set DUNE_API_KEY.'); process.exit(1); }
 const Q = path.resolve('queries');
 const MAP: Record<string, { id: number; file: string }> = {
   // Foundational TWA queries.
-  susds_susdc: { id: 7640317, file: 'twa_susds_susdc_erc4626.sql' },
-  psm3:        { id: 7640318, file: 'twa_susds_psm3_l2.sql' },
-  stusds:      { id: 7640319, file: 'twa_stusds.sql' },
-  farms:       { id: 7640320, file: 'twa_usds_staking_farms.sql' },
-  sp:          { id: 7640321, file: 'twa_sp_vaults.sql' },
+  susds_susdc: { id: 7877542, file: 'twa_susds_susdc_erc4626.sql' },
+  psm3:        { id: 7877543, file: 'twa_susds_psm3_l2.sql' },
+  stusds:      { id: 7877544, file: 'twa_stusds.sql' },
+  farms:       { id: 7877545, file: 'twa_usds_staking_farms.sql' },
+  sp:          { id: 7877546, file: 'twa_sp_vaults.sql' },
+  // Helper queries (reward rates + conversion rates + sp* deployment ratio).
+  rates:          { id: 7877547, file: 'rates_dr.sql' },
+  conv_susds:     { id: 7877548, file: 'conversion_susds.sql' },
+  conv_stusds:    { id: 7877549, file: 'conversion_stusds.sql' },
+  conv_sp_vaults: { id: 7877550, file: 'conversion_sp_vaults.sql' },
+  deploy_ratio:   { id: 7877551, file: 'deployment_ratio_sp.sql' },
   // Monthly DR source queries.
-  usds_aave:      { id: 7812438, file: 'dr_rewards_monthly_usds_aave.sql' },
-  usds_ref4001:   { id: 7809596, file: 'dr_rewards_monthly_usds_ref4001.sql' },
-  // Per-chain PSM3 monthly queries (split from retired 7646378).
-  psm3_base:      { id: 7647196, file: 'dr_rewards_monthly_psm3_base.sql' },
-  psm3_arbitrum:  { id: 7647197, file: 'dr_rewards_monthly_psm3_arbitrum.sql' },
-  psm3_optimism:  { id: 7647198, file: 'dr_rewards_monthly_psm3_optimism.sql' },
-  psm3_unichain:  { id: 7647199, file: 'dr_rewards_monthly_psm3_unichain.sql' },
+  m_susds_susdc:  { id: 7877552, file: 'dr_rewards_monthly_susds_susdc.sql' },
+  m_stusds:       { id: 7877553, file: 'dr_rewards_monthly_stusds.sql' },
+  m_farms:        { id: 7877554, file: 'dr_rewards_monthly_farms.sql' },
+  m_sp:           { id: 7877555, file: 'dr_rewards_monthly_sp.sql' },
+  usds_aave:      { id: 7877569, file: 'dr_rewards_monthly_usds_aave.sql' },
+  usds_ref4001:   { id: 7877570, file: 'dr_rewards_monthly_usds_ref4001.sql' },
+  // Per-chain PSM3 monthly queries (split from retired 7646378). The Base
+  // windowed set is NOT here — push it with update-psm3-base-windows.ts.
+  psm3_arbitrum:  { id: 7877565, file: 'dr_rewards_monthly_psm3_arbitrum.sql' },
+  psm3_optimism:  { id: 7877566, file: 'dr_rewards_monthly_psm3_optimism.sql' },
+  psm3_unichain:  { id: 7877568, file: 'dr_rewards_monthly_psm3_unichain.sql' },
 };
 
 async function main() {

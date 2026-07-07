@@ -6,12 +6,12 @@
 --   1001, 1002, 1003, 1004, 1007, 1015, 1016, 1017
 --
 -- Sources (Ethereum only):
---   query_7640317 — sUSDS + sUSDC (erc4626, all chains; filtered here to ethereum)
---   query_7640319 — stUSDS         (ethereum only)
---   query_7640320 — USDS farms     (ethereum only: USDS-SKY, USDS-SPK, USDS-CLE)
---   query_7640321 — sp* vaults     (ethereum + avalanche; filtered here to ethereum)
+--   query_7877542 — sUSDS + sUSDC (erc4626, all chains; filtered here to ethereum)
+--   query_7877544 — stUSDS         (ethereum only)
+--   query_7877545 — USDS farms     (ethereum only: USDS-SKY, USDS-SPK, USDS-CLE)
+--   query_7877546 — sp* vaults     (ethereum + avalanche; filtered here to ethereum)
 --
--- PSM3 (query_7640318) is L2-only so is not included.
+-- PSM3 (query_7877543) is L2-only so is not included.
 --
 -- Output per (user_addr, ref_code, token):
 --   source         — which pipeline source the row comes from
@@ -41,7 +41,7 @@ with
             symbol as token,
             dt,
             time_weighted_avg_balance
-        from query_7640317
+        from query_7877542
         where blockchain = 'ethereum'
           and ref_code in (select code from target_codes)
           and time_weighted_avg_balance > 0
@@ -58,7 +58,7 @@ with
             symbol as token,
             dt,
             time_weighted_avg_balance
-        from query_7640319
+        from query_7877544
         where blockchain = 'ethereum'
           and ref_code in (select code from target_codes)
           and time_weighted_avg_balance > 0
@@ -75,7 +75,7 @@ with
             symbol as token,
             dt,
             time_weighted_avg_balance
-        from query_7640320
+        from query_7877545
         where blockchain = 'ethereum'
           and ref_code in (select code from target_codes)
           and time_weighted_avg_balance > 0
@@ -92,7 +92,7 @@ with
             symbol as token,
             dt,
             time_weighted_avg_balance
-        from query_7640321
+        from query_7877546
         where blockchain = 'ethereum'
           and ref_code in (select code from target_codes)
           and time_weighted_avg_balance > 0

@@ -6,11 +6,11 @@
 --
 -- Grain: (month, blockchain, token, ref_code).
 --
--- Pipeline: TWA balance (query_7640319) x reward rate (query_7640322,
--- XR-stUSDS) x stUSDS share->USD rate (query_7640324, by dt).
+-- Pipeline: TWA balance (query_7877544) x reward rate (query_7877547,
+-- XR-stUSDS) x stUSDS share->USD rate (query_7877549, by dt).
 -- Untagged stUSDS keeps the -999999 sentinel (no reclassification in Spark).
 --
--- SAVED AS: query_7646379  (https://dune.com/queries/7646379)
+-- SAVED AS: query_7877553  (https://dune.com/queries/7877553)
 -- =============================================================================
 with
     balances as (
@@ -20,7 +20,7 @@ with
             symbol as token,
             ref_code,
             sum(time_weighted_avg_balance) as amount
-        from query_7640319
+        from query_7877544
         group by 1, 2, 3, 4
     ),
 
@@ -29,7 +29,7 @@ with
             b.dt, b.blockchain, b.token, b.ref_code, b.amount,
             b.amount / 365.0 * r.reward_per as tw_reward
         from balances b
-        join query_7640322 r
+        join query_7877547 r
             on r.reward_code = 'XR-stUSDS'
             and b.dt between r.start_dt and r.end_dt
     ),
@@ -39,7 +39,7 @@ with
             a.dt, a.blockchain, a.token, a.ref_code, a.amount,
             a.tw_reward * coalesce(ct.stusds_conversion_rate, 1) as tw_reward_usd
         from accrued a
-        left join query_7640324 ct on a.dt = ct.dt
+        left join query_7877549 ct on a.dt = ct.dt
     )
 
 select
