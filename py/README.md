@@ -96,6 +96,34 @@ with the 112,407 − 111,177 row-count gap.
 precision on every material balance, across full history; the only differences
 are dust rows at the filter boundary, contributing ~nothing to any DR figure.
 
+## Regression tests (offline Dune parity)
+
+`py/tests/test_parity.py` locks in the Dune parity each token was validated at,
+so a future change that breaks **any** already-ported token fails immediately.
+It runs **offline** — no Dune quota, no network, ~3s:
+
+```bash
+.venv/bin/python -m pytest py/tests/test_parity.py -v
+```
+
+Each fixture under `py/tests/fixtures/<token>_<end>/` holds the **captured raw
+HyperSync events** (Transfer + Referral `LogRow`s) plus the **Dune golden**
+output for that window. The test replays the pipeline on the raw events and
+asserts, per fixture: every shared `(chain, contract, user, dt, ref_code)` key
+matches on TWA (abs tol 1e-6) and `day_type`; Σ TWA equals Dune (rel tol 1e-9);
+and any unmatched keys are dust only (`|TWA| ≤ 1e-4`). A 0.01 % perturbation is
+caught on every fixture.
+
+### Per-token workflow (each new token follows this loop)
+
+1. **Write** the source (event wiring) using HyperSync.
+2. **Validate live** vs the token's Dune query: `py/validate.py <token> --query <id>`
+   — expect exact Σ parity, only dust unmatched.
+3. **Capture + commit** a fixture so it can't regress:
+   `py/tests/capture_fixture.py <token> --end <date>`, then `pytest` (green).
+4. Re-run the **whole** suite so earlier tokens are re-checked (step 3 does this).
+5. Move on to the next token.
+
 ## Status
 
 Per-token migration off Dune onto Envio HyperSync:

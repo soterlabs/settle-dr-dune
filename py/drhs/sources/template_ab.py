@@ -97,22 +97,36 @@ def build_legs(
     return legs
 
 
-def _legs_for_target(t: Target, end_ts: int) -> pd.DataFrame:
+def fetch_target_rows(t: Target, end_ts: int):
+    """Fetch the raw Referral + Transfer ``LogRow``s for ``t`` over the scan
+    window. Split from the pure leg logic so fixtures can capture these rows
+    and tests can replay ``legs_from_rows`` offline."""
     addr = t.address.lower()
     start_ts = int(datetime(t.start_date.year, t.start_date.month, t.start_date.day,
                             tzinfo=timezone.utc).timestamp())
     from_block = hypersync.find_block_at_or_before(t.blockchain, start_ts)
-    # highest block strictly before the exclusive end
     to_block = hypersync.find_block_at_or_before(t.blockchain, end_ts - 1)
-
-    # 1) Referral events -> latest per (tx_hash, owner) by log_index.
-    ref_res = hypersync.query_logs(
-        t.blockchain,
-        [{"address": [addr], "topics": [[events.REFERRAL_TOPIC0]]}],
+    ref_rows = hypersync.query_logs(
+        t.blockchain, [{"address": [addr], "topics": [[events.REFERRAL_TOPIC0]]}],
         from_block, to_block,
-    )
+    ).rows
+    tr_rows = hypersync.query_logs(
+        t.blockchain, [{"address": [addr], "topics": [[events.TRANSFER_TOPIC0]]}],
+        from_block, to_block,
+    ).rows
+    return ref_rows, tr_rows
+
+
+def legs_from_rows(t: Target, ref_rows, tr_rows, end_ts: int) -> pd.DataFrame:
+    """Pure: raw Referral + Transfer ``LogRow``s -> balance-change legs.
+
+    No network. Same logic the SQL applies: latest referral per (tx, owner);
+    +to / -from legs (zero address never tracked); scan window
+    date(ts) >= start_date AND ts < end_ts.
+    """
+    # 1) Referral events -> latest per (tx_hash, owner) by log_index.
     latest_ref: dict[tuple[str, str], tuple[int, int]] = {}  # (tx,user)->(log_index, code)
-    for r in ref_res.rows:
+    for r in ref_rows:
         if r.transaction_hash is None:
             continue
         owner = events.topic_to_addr(r.topic2)
@@ -123,34 +137,31 @@ def _legs_for_target(t: Target, end_ts: int) -> pd.DataFrame:
             latest_ref[key] = (r.log_index, code)
 
     # 2) Transfer events -> +to / -from legs, decimal-scaled, ref by (tx, user).
-    tr_res = hypersync.query_logs(
-        t.blockchain,
-        [{"address": [addr], "topics": [[events.TRANSFER_TOPIC0]]}],
-        from_block, to_block,
-    )
     scale = 10 ** t.decimals
     start_day = t.start_date
     recs: list[dict] = []
-    for r in tr_res.rows:
+    for r in tr_rows:
         if r.block_time >= end_ts:
             continue
         if datetime.fromtimestamp(r.block_time, tz=timezone.utc).date() < start_day:
             continue
         frm = events.topic_to_addr(r.topic1)
         to = events.topic_to_addr(r.topic2)
-        value = events.transfer_value(r.data)
-        amt = value / scale
+        amt = events.transfer_value(r.data) / scale
         tx = r.transaction_hash
         if to != events.ZERO_ADDR:
-            ref = latest_ref.get((tx, to))
-            recs.append(_leg(t, to, r, amt, ref))
+            recs.append(_leg(t, to, r, amt, latest_ref.get((tx, to))))
         if frm != events.ZERO_ADDR:
-            ref = latest_ref.get((tx, frm))
-            recs.append(_leg(t, frm, r, -amt, ref))
+            recs.append(_leg(t, frm, r, -amt, latest_ref.get((tx, frm))))
 
     if not recs:
         return pd.DataFrame()
     return pd.DataFrame(recs)
+
+
+def _legs_for_target(t: Target, end_ts: int) -> pd.DataFrame:
+    ref_rows, tr_rows = fetch_target_rows(t, end_ts)
+    return legs_from_rows(t, ref_rows, tr_rows, end_ts)
 
 
 def _leg(t: Target, user: str, r, amount: float, ref: tuple[int, int] | None) -> dict:

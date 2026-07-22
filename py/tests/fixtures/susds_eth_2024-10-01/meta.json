@@ -1,0 +1,12 @@
+{
+  "source": "susds_eth",
+  "end": "2024-10-01",
+  "query_id": 7877542,
+  "excluded": [
+    "0x00836fe54625be242bcfa286207795405ca4fd10",
+    "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+    "0xbc65ad17c5c0a2a4d159fa5a503f4992c7b545fe",
+    "0xbe3d4ec488a0a042bb86f9176c24f8cd54018ba7"
+  ],
+  "dune_rows": 2344
+}
