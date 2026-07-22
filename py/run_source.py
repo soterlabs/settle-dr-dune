@@ -62,6 +62,13 @@ SPECS: dict[str, SourceSpec] = {
     "usds_farm_sky": SourceSpec(template_d, [template_d.SKY], 7877545),
     "usds_farm_spk": SourceSpec(template_d, [template_d.SPK], 7877545),
     "usds_farm_cle": SourceSpec(template_d, [template_d.CLE], 7877545),
+    # Template E — Spark sp* vaults (== Template A code path; no exclusions).
+    "sp_vaults": SourceSpec(template_ab, template_ab.TEMPLATE_E, 7877546),
+    "sp_usdc_eth": SourceSpec(template_ab, [template_ab.SP_USDC_ETH], 7877546),
+    "sp_usdc_avax": SourceSpec(template_ab, [template_ab.SP_USDC_AVAX], 7877546),
+    "sp_usdt_eth": SourceSpec(template_ab, [template_ab.SP_USDT_ETH], 7877546),
+    "sp_pyusd_eth": SourceSpec(template_ab, [template_ab.SP_PYUSD_ETH], 7877546),
+    "sp_eth_eth": SourceSpec(template_ab, [template_ab.SP_ETH_ETH], 7877546),
 }
 
 

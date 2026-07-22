@@ -60,6 +60,10 @@ def _req(method: str, url: str, **kw) -> dict:
     raise RuntimeError(f"Dune {method} {url}: repeated {res.status_code}s")
 
 
+MAX_DOWNLOAD_ROWS = 200_000  # runaway guard: a windowed golden should be small;
+#                              aborting early protects the Dune datapoint quota.
+
+
 def run_dune(query_id: int, end: date, filters: str | None = None) -> pd.DataFrame:
     end_param = f"{end.isoformat()} 00:00:00"
     print(f"[dune] executing query {query_id} end_date={end_param} ...", flush=True)
@@ -97,6 +101,11 @@ def run_dune(query_id: int, end: date, filters: str | None = None) -> pd.DataFra
         offset += len(chunk)
         if len(chunk) < page:
             break
+        if len(rows) > MAX_DOWNLOAD_ROWS:
+            raise RuntimeError(
+                f"Dune download exceeded {MAX_DOWNLOAD_ROWS} rows (offset {offset}) — "
+                f"filter likely ineffective (fill tail); aborting to protect quota. "
+                f"Use a shorter --end / --dt-max window.")
         time.sleep(1.0)
     print(f"[dune] downloaded {len(rows)} rows", flush=True)
     return pd.DataFrame(rows)

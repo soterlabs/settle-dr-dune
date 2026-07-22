@@ -65,6 +65,18 @@ SUSDC_UNI = Target("unichain", "sUSDC", "0x14d9143becc348920b68d123687045db49a01
 
 TEMPLATE_A_SUSDC = [SUSDC_ETH, SUSDC_BASE, SUSDC_ARB, SUSDC_OPT, SUSDC_UNI]
 
+# Template E: Spark sp* vaults — structurally identical to Template A (ERC4626
+# Transfer + 4-arg Referral by (tx, owner); SparkVault shares the ERC4626
+# Referral topic0). No address exclusions. Decimals: sp{USDC,USDT,PYUSD}=6,
+# spETH=18 (verified via tokens.erc20). spUSDC shares one address across
+# ethereum + avalanche_c. Mirrors queries/twa_sp_vaults.sql.
+SP_USDC_ETH = Target("ethereum", "spUSDC", "0x28b3a8fb53b741a8fd78c0fb9a6b2393d896a43d", 6, date(2024, 9, 1))
+SP_USDC_AVAX = Target("avalanche_c", "spUSDC", "0x28b3a8fb53b741a8fd78c0fb9a6b2393d896a43d", 6, date(2024, 9, 1))
+SP_USDT_ETH = Target("ethereum", "spUSDT", "0xe2e7a17dff93280dec073c995595155283e3c372", 6, date(2024, 9, 1))
+SP_PYUSD_ETH = Target("ethereum", "spPYUSD", "0x80128dbb9f07b93dde62a6daeadb69ed14a7d354", 6, date(2024, 9, 1))
+SP_ETH_ETH = Target("ethereum", "spETH", "0xfe6eb3b609a7c8352a241f7f3a21cea4e9209b8f", 18, date(2024, 9, 1))
+TEMPLATE_E = [SP_USDC_ETH, SP_USDC_AVAX, SP_USDT_ETH, SP_PYUSD_ETH, SP_ETH_ETH]
+
 
 def _end_ts(end_date: date) -> int:
     eff = min(end_date, DEFAULT_END)
