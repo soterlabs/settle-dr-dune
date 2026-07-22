@@ -161,6 +161,30 @@ Per-token migration off Dune onto Envio HyperSync:
       (== Template A code path, sp\* targets). Σ TWA reldiff 1.3e-16; day_type +
       segment exact. Fixture `sp_vaults` (spUSDC/spUSDT/spETH; spPYUSD + avax
       spUSDC launched later). Deployment ratio + spETH zeroing are Layer 3.
-- [ ] Layer 2–4 stack on top of TWA: rate application (`rates_dr`), USD conversion
-      (`conversion_*`), monthly rollups, and the per-ref_code combine
+- [x] **Layer 2–4 revenue stack: ported + validated** (`drhs/revenue/`).
+      - `rates.py` (rates_dr): hardcoded APY schedule — byte-exact vs Dune 7877547.
+      - `conversion.py` (conversion_susds/stusds/sp_vaults): share→asset rate from
+        ERC4626 Deposit/Withdraw events — machine precision vs 7877548/549/550.
+      - `deployment.py` (deployment_ratio_sp): idle-holdings TWA from underlying
+        Transfer events ÷ sp-vault TWA — spUSDC ratio 1.1e-16, idle exact vs 7877551.
+      - `monthly.py` (dr_rewards_monthly_*): monthly DR = TWA × rate × conversion
+        (× deployment for spUSDC), per-source reclassification — validated vs
+        7877552/553/554/555/565 (Σ reldiff ≤ 4.4e-10, dust only).
+      - `pipeline.py` + `run_dr_pipeline.py`: Dune-free replacement for
+        `combine-dr-results.ts` — wires TWA→rates→conversions→deployment→monthly
+        and merges the per-source outputs into the per-ref_code rollups.
+
+## Dune is fully replaced
+
+Every DR query — Layer 0/1 TWA (all 5 templates) **and** Layer 2–4
+(rates/conversions/deployment/monthly/combine) — now runs off **Envio HyperSync
+events + Python**, with **zero Dune and zero RPC**. Conversions that looked like
+they'd need contract-state reads are derived from Deposit/Withdraw event fields;
+the only price feed (WETH, for spETH) is unnecessary because spETH DR is zeroed.
+
+**Performance note:** the pure-Python TWA engine materializes per-user-per-day
+rows (with the no-transaction fill), so a *full-history* run of the high-volume
+sources (sUSDC, sp\*, L2 PSM3 base) is slow / memory-heavy. Windowed runs and the
+per-source monthly aggregation are fine; a vectorized TWA engine is the
+optimization for full-history production runs.
 ```
