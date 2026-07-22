@@ -15,7 +15,11 @@ against the stUSDS contract, 2026-07):
 from __future__ import annotations
 
 TRANSFER_TOPIC0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+# ERC4626 vaults: Referral(uint16 indexed referral, address indexed owner, uint256 assets, uint256 shares)
 REFERRAL_TOPIC0 = "0xb30a03a0e2a407f18ae0e83491331dc069d1521e292feffb071e61c8f7f40636"
+# SNX staking wrappers: Referral(uint16 indexed referral, address indexed user, uint256 amount)
+# — 3-arg, different topic0, but same indexed layout (code=topic1, user=topic2).
+REFERRAL3_TOPIC0 = "0x16902e34d01e8d5f80ce64939920a1390ff67f2546ae43ae72ac482033300968"
 SWAP_TOPIC0 = "0xdba43ee9916cb156cc32a5d3406e87341e568126a46815294073ba25c9400246"
 STAKED_TOPIC0 = "0x9e71bc8eea02a63969f509818f2dafb9254532904319f9dbda79b67bd34a5f3d"
 WITHDRAWN_TOPIC0 = "0x7084f5476618d8e60b11ef0d7d3f06914655adb8793e28ff7f018d4c76d505d5"

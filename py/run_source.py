@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 load_dotenv(ROOT / ".env")
 
 from drhs import twa  # noqa: E402
-from drhs.sources import template_ab, template_c  # noqa: E402
+from drhs.sources import template_ab, template_c, template_d  # noqa: E402
 
 _EXC = template_ab.TEMPLATE_A_EXCLUDED
 
@@ -57,6 +57,11 @@ SPECS: dict[str, SourceSpec] = {
     "susds_psm3_arb": SourceSpec(template_c, [template_c.ARB], 7877543, ref_kind="swaps", excluded=_EXC),
     "susds_psm3_opt": SourceSpec(template_c, [template_c.OPT], 7877543, ref_kind="swaps", excluded=_EXC),
     "susds_psm3_uni": SourceSpec(template_c, [template_c.UNI], 7877543, ref_kind="swaps", excluded=_EXC),
+    # Template D — USDS staking farms (Staked/Withdrawn balance; no exclusions).
+    "usds_farms": SourceSpec(template_d, template_d.ALL, 7877545),
+    "usds_farm_sky": SourceSpec(template_d, [template_d.SKY], 7877545),
+    "usds_farm_spk": SourceSpec(template_d, [template_d.SPK], 7877545),
+    "usds_farm_cle": SourceSpec(template_d, [template_d.CLE], 7877545),
 }
 
 
