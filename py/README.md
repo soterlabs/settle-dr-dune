@@ -37,7 +37,7 @@ drhs/
   sources/
     template_ab.py        Template A/B: ERC20/ERC4626 Transfer (balance) + Referral (ref_code)
 run_source.py             CLI: run a source -> shared-schema CSV in ../hypersync-results/
-validate_stusds.py        diff a source vs its Dune query per (user, dt, ref_code)
+validate.py               diff a source vs its Dune query per (chain, contract, user, dt, ref)
 ```
 
 `twa.py` reproduces, step for step, the `queries/twa_stusds.sql` tail:
@@ -52,7 +52,7 @@ for that user in the same tx (latest by log index), forward-filled per user.
 ```bash
 python3 -m venv .venv && .venv/bin/pip install pandas requests python-dotenv
 .venv/bin/python py/run_source.py stusds            # -> hypersync-results/twa_stusds.csv
-.venv/bin/python py/validate_stusds.py --end 2025-12-01
+.venv/bin/python py/validate.py stusds --end 2025-12-01
 ```
 
 Output columns match `dune.sparkdotfi.result_spark_..._time_weighted_average_balance`
@@ -62,7 +62,7 @@ segment_duration_seconds, segment_balance_time_product`.
 
 ## Validation (stUSDS, Dune query 7877544)
 
-**Per-row value parity — windowed (2024-09-01 → 2025-12-01)**, `validate_stusds.py`:
+**Per-row value parity — windowed (2024-09-01 → 2025-12-01)**, `validate.py stusds`:
 
 | metric | value |
 |---|---|
@@ -73,7 +73,7 @@ segment_duration_seconds, segment_balance_time_product`.
 | unmatched keys | 38 HS-only / 301 Dune-only, all TWA ≤ ~1e-12 (dust at the `twab>0` boundary) |
 
 **Full history (through the 2026-07-01 cutoff)** — full per-row diff of all
-columns (`validate_stusds.py --end 2026-07-01`):
+columns (`validate.py stusds --end 2026-07-01 --dt-max 2026-07-01`):
 
 | metric | value |
 |---|---|
@@ -103,7 +103,9 @@ Per-token migration off Dune onto Envio HyperSync:
 - [x] HyperSync client + event codecs + TWA engine (shared SQL tail)
 - [x] **stUSDS (Template B): ported to Envio HyperSync — replaces Dune query
       7877544.** Full-history per-row parity confirmed (see above).
-- [ ] **sUSDS (Template A, eth): in progress** — validate vs Dune 7877542
+- [x] **sUSDS (Template A, eth): ported to Envio HyperSync — replaces the sUSDS/eth
+      slice of Dune query 7877542.** Windowed per-row parity exact (Σ TWA reldiff 0;
+      day_type + segment_duration exact; only sub-1.5e-11 dust rows differ).
 - [ ] sUSDC (Template A, eth + base/arbitrum/optimism/unichain) — vs Dune 7877542
 - [ ] L2 sUSDS via PSM3 (Template C) — `Swap.referralCode` + token `Transfer`
 - [ ] USDS staking farms (Template D) — `Staked`/`Withdrawn` + `Referral`

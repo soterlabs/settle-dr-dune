@@ -37,6 +37,19 @@ class Target:
     start_date: date
 
 
+# Protocol/vault contracts that hold sUSDS/sUSDC on behalf of other users;
+# counting them as depositors double-counts the positions they represent. This
+# mirrors the `excluded_addresses` CTE in queries/twa_susds_susdc_erc4626.sql
+# (Template A) and is applied to that source's output. Template B (stUSDS) has
+# no exclusions. Lower-cased.
+TEMPLATE_A_EXCLUDED: frozenset[str] = frozenset({
+    "0xbc65ad17c5c0a2a4d159fa5a503f4992c7b545fe",  # sUSDC vault (holds sUSDS for sUSDC depositors)
+    "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",  # Morpho
+    "0xbe3d4ec488a0a042bb86f9176c24f8cd54018ba7",  # Pendle
+    "0x00836fe54625be242bcfa286207795405ca4fd10",  # Curve PSM
+})
+
+
 # --- Target matrix (queries/README.md §Target matrix) ------------------------
 # NB: sUSDC is 18 decimals on EVERY chain (verified via tokens.erc20), not 6.
 STUSDS = Target("ethereum", "stUSDS", "0x99cd4ec3f88a45940936f469e4bb72a2a701eeb9", 18, date(2024, 9, 1))
@@ -58,7 +71,19 @@ def _end_ts(end_date: date) -> int:
     return int(datetime(eff.year, eff.month, eff.day, tzinfo=timezone.utc).timestamp())
 
 
-def build_legs(targets: list[Target], *, end_date: date = DEFAULT_END) -> pd.DataFrame:
+def build_legs(
+    targets: list[Target], *, end_date: date = DEFAULT_END,
+    excluded: frozenset[str] = frozenset(),
+) -> pd.DataFrame:
+    """Balance-change legs for ``targets``.
+
+    ``excluded`` addresses are dropped as users (their own legs are removed).
+    Because each excluded contract appears only as itself in the output, this
+    is exactly equivalent to the SQL's final
+    ``user_addr not in (select addr from excluded_addresses)`` filter — other
+    users' legs (e.g. a transfer *from* an excluded contract *to* a real user)
+    are untouched.
+    """
     frames = [_legs_for_target(t, _end_ts(end_date)) for t in targets]
     frames = [f for f in frames if not f.empty]
     if not frames:
@@ -66,7 +91,10 @@ def build_legs(targets: list[Target], *, end_date: date = DEFAULT_END) -> pd.Dat
             "blockchain", "contract_address", "symbol", "user_addr",
             "block", "log_index", "ts", "amount_change", "ref_code",
         ])
-    return pd.concat(frames, ignore_index=True)
+    legs = pd.concat(frames, ignore_index=True)
+    if excluded:
+        legs = legs[~legs["user_addr"].str.lower().isin(excluded)].copy()
+    return legs
 
 
 def _legs_for_target(t: Target, end_ts: int) -> pd.DataFrame:

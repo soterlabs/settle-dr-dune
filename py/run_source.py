@@ -30,6 +30,13 @@ SOURCES = {
     "susdc": template_ab.TEMPLATE_A_SUSDC,
 }
 
+# Per-source address exclusions (Template A drops protocol/vault holders; see
+# template_ab.TEMPLATE_A_EXCLUDED). stUSDS (Template B) has none.
+SOURCE_EXCLUDED = {
+    "susds_eth": template_ab.TEMPLATE_A_EXCLUDED,
+    "susdc": template_ab.TEMPLATE_A_EXCLUDED,
+}
+
 
 def _parse_date(s: str) -> date:
     return datetime.strptime(s, "%Y-%m-%d").date()
@@ -44,8 +51,9 @@ def main() -> int:
     args = ap.parse_args()
 
     targets = SOURCES[args.source]
+    excluded = SOURCE_EXCLUDED.get(args.source, frozenset())
     print(f"[{args.source}] fetching events via HyperSync ...", flush=True)
-    legs = template_ab.build_legs(targets, end_date=args.end)
+    legs = template_ab.build_legs(targets, end_date=args.end, excluded=excluded)
     print(f"[{args.source}] {len(legs)} balance-change legs; computing TWA ...", flush=True)
     df = twa.compute_twa(legs)
     print(f"[{args.source}] {len(df)} TWA rows "
