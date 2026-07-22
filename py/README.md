@@ -134,7 +134,11 @@ Per-token migration off Dune onto Envio HyperSync:
 - [x] **sUSDS (Template A, eth): ported to Envio HyperSync — replaces the sUSDS/eth
       slice of Dune query 7877542.** Windowed per-row parity exact (Σ TWA reldiff 0;
       day_type + segment_duration exact; only sub-1.5e-11 dust rows differ).
-- [ ] sUSDC (Template A, eth + base/arbitrum/optimism/unichain) — vs Dune 7877542
+- [x] **sUSDC (Template A, eth + base/arbitrum/optimism/unichain): ported —
+      replaces the sUSDC slice of Dune 7877542.** Multi-chain launch-cohort
+      windows validated exact (Σ TWA reldiff 0; day_type + segment_duration
+      exact; only dust differs). Regression fixtures `susdc_mar` (eth/base/arb)
+      and `susdc_jun` (optimism/unichain).
 - [ ] L2 sUSDS via PSM3 (Template C) — `Swap.referralCode` + token `Transfer`
 - [ ] USDS staking farms (Template D) — `Staked`/`Withdrawn` + `Referral`
 - [ ] sp\* vaults (Template E; deployment ratio applied downstream)

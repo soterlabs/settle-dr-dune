@@ -18,6 +18,7 @@ Dune validation passes, commit it, and this suite covers it automatically.
 
 from __future__ import annotations
 
+import gzip
 import json
 import sys
 from datetime import date
@@ -46,8 +47,22 @@ def _fixtures() -> list[Path]:
     return sorted(p for p in FIX_DIR.glob("*") if (p / "meta.json").exists())
 
 
-def _load_rows(path: Path) -> list[LogRow]:
-    return [LogRow(**d) for d in json.loads(path.read_text())]
+def _load_rows(fix: Path, tag: str, kind: str) -> list[LogRow] | None:
+    """Load captured LogRows for a target; gzip (.json.gz) or plain (.json)."""
+    gz, plain = fix / f"{tag}.{kind}.json.gz", fix / f"{tag}.{kind}.json"
+    if gz.exists():
+        with gzip.open(gz, "rt", encoding="utf-8") as f:
+            data = json.load(f)
+    elif plain.exists():
+        data = json.loads(plain.read_text())
+    else:
+        return None
+    return [LogRow(**d) for d in data]
+
+
+def _read_golden(fix: Path) -> pd.DataFrame:
+    gz, plain = fix / "dune_golden.csv.gz", fix / "dune_golden.csv"
+    return pd.read_csv(gz) if gz.exists() else pd.read_csv(plain)
 
 
 def _replay(fix: Path) -> pd.DataFrame:
@@ -60,10 +75,11 @@ def _replay(fix: Path) -> pd.DataFrame:
     frames = []
     for t in targets:
         tag = f"{t.blockchain}_{t.address.lower()}"
-        rf, tf = fix / f"{tag}.referrals.json", fix / f"{tag}.transfers.json"
-        if not tf.exists():
+        ref = _load_rows(fix, tag, "referrals")
+        tr = _load_rows(fix, tag, "transfers")
+        if tr is None:
             continue
-        legs = template_ab.legs_from_rows(t, _load_rows(rf), _load_rows(tf), end_ts)
+        legs = template_ab.legs_from_rows(t, ref or [], tr, end_ts)
         if not legs.empty:
             frames.append(legs)
     legs = pd.concat(frames, ignore_index=True)
@@ -86,7 +102,7 @@ def _key(df: pd.DataFrame) -> pd.DataFrame:
 @pytest.mark.parametrize("fix", _fixtures(), ids=lambda p: p.name)
 def test_dune_parity(fix: Path):
     hs = _key(_replay(fix))
-    dn = _key(pd.read_csv(fix / "dune_golden.csv"))
+    dn = _key(_read_golden(fix))
     dn["dn_twab"] = dn["time_weighted_avg_balance"].astype(float)
     dn["dn_daytype"] = dn["day_type"]
 

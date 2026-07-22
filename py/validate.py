@@ -37,7 +37,10 @@ from drhs.sources import template_ab  # noqa: E402
 from run_source import SOURCES, SOURCE_EXCLUDED  # noqa: E402
 
 DUNE_BASE = "https://api.dune.com/api/v1"
-DEFAULT_QUERY = {"stusds": 7877544, "susds_eth": 7877542, "susdc": 7877542}
+DEFAULT_QUERY = {
+    "stusds": 7877544, "susds_eth": 7877542, "susdc": 7877542,
+    "susdc_mar": 7877542, "susdc_jun": 7877542,
+}
 
 
 def _parse_date(s: str) -> date:
@@ -149,7 +152,9 @@ def main() -> int:
           f"pairs, symbols={symbols}", flush=True)
 
     sym_clause = " or ".join(f"symbol = '{s}'" for s in symbols)
-    filters = f"({sym_clause}) and dt < '{dt_max_s}'"
+    chains = sorted({c for c, _ in covered})
+    chain_clause = " or ".join(f"blockchain = '{c}'" for c in chains)
+    filters = f"({sym_clause}) and ({chain_clause}) and dt < '{dt_max_s}'"
     dn = run_dune(query_id, args.end, filters=filters)
     if dn.empty:
         print("[dune] EMPTY result — cannot validate.")

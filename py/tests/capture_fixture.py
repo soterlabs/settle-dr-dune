@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import gzip
 import json
 import sys
 from datetime import date, datetime
@@ -37,6 +38,11 @@ from run_source import SOURCES, SOURCE_EXCLUDED  # noqa: E402
 from validate import DEFAULT_QUERY, run_dune  # noqa: E402
 
 FIX_DIR = Path(__file__).parent / "fixtures"
+
+
+def _write_gz(path: Path, obj) -> None:
+    with gzip.open(path, "wt", encoding="utf-8") as f:
+        json.dump(obj, f)
 
 
 def _parse_date(s: str) -> date:
@@ -63,17 +69,17 @@ def main() -> int:
         print(f"[capture] fetching {t.symbol} {t.blockchain} {t.address} ...", flush=True)
         ref_rows, tr_rows = template_ab.fetch_target_rows(t, end_ts)
         tag = f"{t.blockchain}_{t.address.lower()}"
-        (out / f"{tag}.referrals.json").write_text(
-            json.dumps([dataclasses.asdict(r) for r in ref_rows]))
-        (out / f"{tag}.transfers.json").write_text(
-            json.dumps([dataclasses.asdict(r) for r in tr_rows]))
+        _write_gz(out / f"{tag}.referrals.json.gz", [dataclasses.asdict(r) for r in ref_rows])
+        _write_gz(out / f"{tag}.transfers.json.gz", [dataclasses.asdict(r) for r in tr_rows])
         covered.add((t.blockchain, t.address.lower()))
         print(f"  {len(ref_rows)} referrals, {len(tr_rows)} transfers", flush=True)
 
     # Dune golden (server-side filtered to symbols + dt < end).
     symbols = sorted({t.symbol for t in targets})
+    chains = sorted({t.blockchain for t in targets})
     sym_clause = " or ".join(f"symbol = '{s}'" for s in symbols)
-    filters = f"({sym_clause}) and dt < '{end_s}'"
+    chain_clause = " or ".join(f"blockchain = '{c}'" for c in chains)
+    filters = f"({sym_clause}) and ({chain_clause}) and dt < '{end_s}'"
     dn = run_dune(query_id, args.end, filters=filters)
     dn["_c"] = list(zip(dn["blockchain"], dn["contract_address"].str.lower()))
     dn = dn[[c in covered for c in dn["_c"]]].drop(columns="_c")
@@ -83,7 +89,7 @@ def main() -> int:
     keep = ["blockchain", "contract_address", "symbol", "user_addr", "dt", "ref_code",
             "time_weighted_avg_balance", "day_type",
             "segment_duration_seconds", "segment_balance_time_product"]
-    dn[keep].to_csv(out / "dune_golden.csv", index=False)
+    dn[keep].to_csv(out / "dune_golden.csv.gz", index=False, compression="gzip")
 
     (out / "meta.json").write_text(json.dumps({
         "source": args.source, "end": end_s, "query_id": query_id,

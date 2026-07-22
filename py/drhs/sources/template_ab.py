@@ -104,7 +104,13 @@ def fetch_target_rows(t: Target, end_ts: int):
     addr = t.address.lower()
     start_ts = int(datetime(t.start_date.year, t.start_date.month, t.start_date.day,
                             tzinfo=timezone.utc).timestamp())
-    from_block = hypersync.find_block_at_or_before(t.blockchain, start_ts)
+    try:
+        from_block = hypersync.find_block_at_or_before(t.blockchain, start_ts)
+    except hypersync.HyperSyncError:
+        # start_date (hardcoded 2024-09-01) can precede an L2's genesis
+        # (e.g. unichain). Scan from genesis — matches Dune, which simply finds
+        # no events before the chain existed.
+        from_block = 0
     to_block = hypersync.find_block_at_or_before(t.blockchain, end_ts - 1)
     ref_rows = hypersync.query_logs(
         t.blockchain, [{"address": [addr], "topics": [[events.REFERRAL_TOPIC0]]}],
