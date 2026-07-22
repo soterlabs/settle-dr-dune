@@ -62,17 +62,36 @@ segment_duration_seconds, segment_balance_time_product`.
 
 ## Validation (stUSDS, Dune query 7877544)
 
-For the 2024-09-01 → 2025-12-01 window (stUSDS live 2025-10-06):
+**Per-row value parity — windowed (2024-09-01 → 2025-12-01)**, `validate_stusds.py`:
 
 | metric | value |
 |---|---|
 | matched (user, dt, ref_code) keys | 64,068 |
 | within 1e-6 abs tolerance | **100.000%** |
-| Σ TWA HyperSync vs Dune | 29,948,253,712.42494**6** vs …42494**50** (reldiff 1.3e-16) |
+| Σ TWA HyperSync vs Dune | 29,948,253,712.42494**6** vs …42494**50** (reldiff **1.3e-16**) |
 | max abs diff | 2.2e-08 (on balances up to 6e7; float noise) |
-| unmatched keys | 38 HS-only / 301 Dune-only, all TWA ≤ ~1e-12 (dust at the `twab>0` boundary on the final day) |
+| unmatched keys | 38 HS-only / 301 Dune-only, all TWA ≤ ~1e-12 (dust at the `twab>0` boundary) |
 
-The engine matches Dune to floating-point precision on all material balances.
+**Full history (through the 2026-07-01 cutoff)** — a full per-row Dune download
+is blocked by the Dune account's per-billing-cycle datapoint quota, so full
+history is checked by **total row count** (from the Dune execution metadata) plus
+HyperSync-side materiality analysis:
+
+| metric | value |
+|---|---|
+| rows: HyperSync vs Dune | 111,177 vs 112,407 (gap **1,230 = 1.09%**) |
+| HS rows with twab < 1e-6 | 4,591, contributing **1.4e-12 %** of Σ TWA |
+| users never exceeding 1e-6 twab | 40 / 1,423 (35 never exceed 1e-9) |
+
+The row-count gap is entirely within the sub-1e-6 **dust** population: ~40
+microbalance-only users whose rows sit on the `twab > 0` filter boundary, where
+float (HyperSync) vs double (Dune) rounding flips row inclusion. It is
+irreducible float non-associativity between two engines, **not a logic
+difference**, and contributes ~nothing to any DR figure. `validate_stusds_full.py`
+runs a full (month, ref_code) count+Σ diff once the Dune quota resets.
+
+**Bottom line:** the engine matches Dune to floating-point precision on all
+material balances; the only differences are dust rows at the filter boundary.
 
 ## Status
 

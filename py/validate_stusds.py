@@ -73,9 +73,14 @@ def run_dune(end: date) -> pd.DataFrame:
     rows: list[dict] = []
     offset = 0
     page = 5000
+    # Only download the columns we compare — the 3 constant columns
+    # (blockchain, contract_address, symbol) are dropped to cut billed
+    # datapoints (~30%) and stay under the result-download quota.
+    cols = ("user_addr,dt,ref_code,time_weighted_avg_balance,day_type,"
+            "segment_duration_seconds,segment_balance_time_product")
     while True:
         j = _req("GET", f"{DUNE_BASE}/execution/{exec_id}/results",
-                 params={"limit": page, "offset": offset})
+                 params={"limit": page, "offset": offset, "columns": cols})
         chunk = j["result"]["rows"]
         rows.extend(chunk)
         offset += len(chunk)
@@ -112,11 +117,17 @@ def main() -> int:
     dn["k_user"] = dn["user_addr"].str.lower()
     dn["k_ref"] = dn["ref_code"].astype(float).astype(int)
     dn["dn_twab"] = dn["time_weighted_avg_balance"].astype(float)
+    dn["dn_daytype"] = dn["day_type"]
+    dn["dn_segdur"] = pd.to_numeric(dn["segment_duration_seconds"], errors="coerce")
+    dn["dn_segprod"] = pd.to_numeric(dn["segment_balance_time_product"], errors="coerce")
 
     keys = ["k_user", "k_dt", "k_ref"]
-    hs_k = hs[keys + ["time_weighted_avg_balance"]].rename(
-        columns={"time_weighted_avg_balance": "hs_twab"})
-    dn_k = dn[keys + ["dn_twab"]]
+    hs_k = hs[keys + ["time_weighted_avg_balance", "day_type",
+                      "segment_duration_seconds", "segment_balance_time_product"]].rename(
+        columns={"time_weighted_avg_balance": "hs_twab", "day_type": "hs_daytype",
+                 "segment_duration_seconds": "hs_segdur",
+                 "segment_balance_time_product": "hs_segprod"})
+    dn_k = dn[keys + ["dn_twab", "dn_daytype", "dn_segdur", "dn_segprod"]]
     m = hs_k.merge(dn_k, on=keys, how="outer", indicator=True)
 
     both = m[m["_merge"] == "both"].copy()
@@ -130,23 +141,40 @@ def main() -> int:
     print(f"rows: HyperSync={len(hs_k)}  Dune={len(dn_k)}  matched keys={len(both)}")
     print(f"only in HyperSync: {len(only_hs)}   only in Dune: {len(only_dn)}")
     within = (both["absdiff"] <= args.tol).sum()
-    print(f"matched within abs tol {args.tol}: {within}/{len(both)} "
-          f"({100*within/max(len(both),1):.3f}%)")
-    print(f"max absdiff={both['absdiff'].max():.3e}  "
-          f"median absdiff={both['absdiff'].median():.3e}  "
-          f"max reldiff={both['reldiff'].max():.3e}")
+    print(f"[TWA]  within abs tol {args.tol}: {within}/{len(both)} "
+          f"({100*within/max(len(both),1):.3f}%)  "
+          f"max absdiff={both['absdiff'].max():.3e}  max reldiff={both['reldiff'].max():.3e}")
+
+    # --- auxiliary column parity on matched keys ---------------------------
+    dtype_mism = both[both["hs_daytype"] != both["dn_daytype"]]
+    print(f"[day_type]  mismatches: {len(dtype_mism)}/{len(both)}")
+    tx = both[both["dn_daytype"] == "transaction_day"].copy()
+    tx["segdur_diff"] = (tx["hs_segdur"] - tx["dn_segdur"]).abs()
+    tx["segprod_diff"] = (tx["hs_segprod"] - tx["dn_segprod"]).abs()
+    tx["segprod_rel"] = tx["segprod_diff"] / tx["dn_segprod"].abs().clip(lower=1e-18)
+    segdur_bad = (tx["segdur_diff"] > 0.5).sum()  # duration is integer seconds
+    print(f"[segment_duration]  exact matches: {len(tx)-segdur_bad}/{len(tx)}  "
+          f"max diff={tx['segdur_diff'].max():.3e}")
+    print(f"[segment_balance_time_product]  max reldiff={tx['segprod_rel'].max():.3e}  "
+          f"max absdiff={tx['segprod_diff'].max():.3e}")
 
     agg_hs = hs["time_weighted_avg_balance"].sum()
     agg_dn = dn["dn_twab"].sum()
     print(f"\nΣ TWA  HyperSync={agg_hs:.6f}  Dune={agg_dn:.6f}  "
           f"reldiff={abs(agg_hs-agg_dn)/max(abs(agg_dn),1e-18):.3e}")
 
-    for label, frame in (("HyperSync-only", only_hs), ("Dune-only", only_dn)):
+    unmatched = m[m["_merge"] != "both"]
+    if len(unmatched):
+        umax = pd.concat([only_hs["hs_twab"], only_dn["dn_twab"]]).abs().max()
+        print(f"\nunmatched keys: {len(unmatched)}  (max |TWA| among them = {umax:.3e})")
+    for label, frame, col in (("HyperSync-only", only_hs, "hs_twab"),
+                              ("Dune-only", only_dn, "dn_twab")):
         if len(frame):
-            print(f"\nsample {label} keys:")
-            print(frame.head(8).to_string(index=False))
+            print(f"sample {label} keys (max |TWA|={frame[col].abs().max():.3e}):")
+            print(frame.sort_values(col, key=lambda s: s.abs(), ascending=False)
+                  .head(5)[keys + [col]].to_string(index=False))
     if len(both):
-        worst = both.sort_values("absdiff", ascending=False).head(8)
+        worst = both.sort_values("absdiff", ascending=False).head(6)
         print("\nworst abs diffs:")
         print(worst[keys + ["hs_twab", "dn_twab", "absdiff"]].to_string(index=False))
     return 0
