@@ -2,6 +2,10 @@ node_modules/
 dist/
 data/
 .env
+.venv/
+__pycache__/
+*.pyc
+hypersync-results/
 *.js.map
 .cache/
 logs/
