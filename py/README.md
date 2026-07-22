@@ -72,26 +72,29 @@ segment_duration_seconds, segment_balance_time_product`.
 | max abs diff | 2.2e-08 (on balances up to 6e7; float noise) |
 | unmatched keys | 38 HS-only / 301 Dune-only, all TWA ≤ ~1e-12 (dust at the `twab>0` boundary) |
 
-**Full history (through the 2026-07-01 cutoff)** — a full per-row Dune download
-is blocked by the Dune account's per-billing-cycle datapoint quota, so full
-history is checked by **total row count** (from the Dune execution metadata) plus
-HyperSync-side materiality analysis:
+**Full history (through the 2026-07-01 cutoff)** — full per-row diff of all
+columns (`validate_stusds.py --end 2026-07-01`):
 
 | metric | value |
 |---|---|
-| rows: HyperSync vs Dune | 111,177 vs 112,407 (gap **1,230 = 1.09%**) |
-| HS rows with twab < 1e-6 | 4,591, contributing **1.4e-12 %** of Σ TWA |
-| users never exceeding 1e-6 twab | 40 / 1,423 (35 never exceed 1e-9) |
+| matched (user, dt, ref_code) keys | 110,376 |
+| TWA within 1e-6 abs tolerance | **100.000%** |
+| `day_type` mismatches | **0 / 110,376** |
+| `segment_duration_seconds` exact | **6,621 / 6,621** |
+| Σ TWA HyperSync vs Dune | 40,123,619,568.04105**4** vs …04104**6** (reldiff **1.9e-16**) |
+| rows: HyperSync vs Dune | 111,177 vs 112,407 |
+| unmatched keys | 2,832 (801 HS-only + 2,031 Dune-only), **max \|TWA\| = 1.6e-08** |
 
-The row-count gap is entirely within the sub-1e-6 **dust** population: ~40
-microbalance-only users whose rows sit on the `twab > 0` filter boundary, where
-float (HyperSync) vs double (Dune) rounding flips row inclusion. It is
-irreducible float non-associativity between two engines, **not a logic
-difference**, and contributes ~nothing to any DR figure. `validate_stusds_full.py`
-runs a full (month, ref_code) count+Σ diff once the Dune quota resets.
+Every one of the 2,832 unmatched rows is **dust** (TWA ≤ 1.6e-8): microbalance
+rows on the `twab > 0` filter boundary, where float (HyperSync) vs double (Dune)
+rounding flips inclusion — irreducible float non-associativity between two
+engines, **not a logic difference** (`day_type` and `segment_duration` match
+exactly, and Σ TWA agrees to 1.9e-16). The 2,031 − 801 = 1,230 net reconciles
+with the 112,407 − 111,177 row-count gap.
 
-**Bottom line:** the engine matches Dune to floating-point precision on all
-material balances; the only differences are dust rows at the filter boundary.
+**Bottom line:** the engine reproduces Dune's stUSDS output to floating-point
+precision on every material balance, across full history; the only differences
+are dust rows at the filter boundary, contributing ~nothing to any DR figure.
 
 ## Status
 
