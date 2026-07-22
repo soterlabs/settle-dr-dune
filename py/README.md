@@ -152,13 +152,15 @@ Per-token migration off Dune onto Envio HyperSync:
       non-deterministically, so a handful of rows can differ immaterially — HS is
       arithmetically correct there. The parity test asserts materiality (tight Σ,
       negligible aggregate diff), not exact per-row equality Dune can't guarantee.
-- [~] **USDS staking farms (Template D): coded + registered** (`usds_farms`;
-      balance from `Staked`/`Withdrawn`, ref from the 3-arg StakingRewards
-      `Referral`; topics verified on-chain). HS side runs; **Dune validation +
-      fixture pending** (blocked on the Dune datapoint quota).
-- [~] **sp\* vaults (Template E): coded + registered** (`sp_vaults`; == Template
-      A code path, sp\* targets; SparkVault Referral topic0 verified on-chain).
-      **Dune validation + fixture pending** (quota). Deployment ratio is Layer 3.
+- [x] **USDS staking farms (Template D): ported + validated + fixtured** vs Dune
+      7877545. Balance from `Staked`/`Withdrawn` (one leg each), ref from the
+      3-arg StakingRewards `Referral`. **Byte-exact** (69,839 rows, max absdiff
+      0.0, Σ reldiff 0). Fixture `usds_farms` (SKY+CLE; SPK farm launched later,
+      no in-window data — same code path).
+- [x] **sp\* vaults (Template E): ported + validated + fixtured** vs Dune 7877546
+      (== Template A code path, sp\* targets). Σ TWA reldiff 1.3e-16; day_type +
+      segment exact. Fixture `sp_vaults` (spUSDC/spUSDT/spETH; spPYUSD + avax
+      spUSDC launched later). Deployment ratio + spETH zeroing are Layer 3.
 - [ ] Layer 2–4 stack on top of TWA: rate application (`rates_dr`), USD conversion
       (`conversion_*`), monthly rollups, and the per-ref_code combine
 ```
