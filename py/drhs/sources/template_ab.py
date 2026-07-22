@@ -123,15 +123,13 @@ def fetch_target_rows(t: Target, end_ts: int):
     return ref_rows, tr_rows
 
 
-def legs_from_rows(t: Target, ref_rows, tr_rows, end_ts: int) -> pd.DataFrame:
-    """Pure: raw Referral + Transfer ``LogRow``s -> balance-change legs.
+def latest_referral_from_events(ref_rows) -> dict[tuple[str, str], tuple[int, int]]:
+    """Referral events -> latest ref_code per (tx_hash, owner) by log_index.
 
-    No network. Same logic the SQL applies: latest referral per (tx, owner);
-    +to / -from legs (zero address never tracked); scan window
-    date(ts) >= start_date AND ts < end_ts.
+    Owner is the indexed topic2; ref_code the indexed uint16 topic1. Returns
+    {(tx, owner_addr): (log_index, code)}.
     """
-    # 1) Referral events -> latest per (tx_hash, owner) by log_index.
-    latest_ref: dict[tuple[str, str], tuple[int, int]] = {}  # (tx,user)->(log_index, code)
+    latest_ref: dict[tuple[str, str], tuple[int, int]] = {}
     for r in ref_rows:
         if r.transaction_hash is None:
             continue
@@ -141,8 +139,19 @@ def legs_from_rows(t: Target, ref_rows, tr_rows, end_ts: int) -> pd.DataFrame:
         prev = latest_ref.get(key)
         if prev is None or r.log_index > prev[0]:
             latest_ref[key] = (r.log_index, code)
+    return latest_ref
 
-    # 2) Transfer events -> +to / -from legs, decimal-scaled, ref by (tx, user).
+
+def transfer_legs(
+    t: Target, tr_rows, latest_ref: dict[tuple[str, str], tuple[int, int]], end_ts: int,
+) -> pd.DataFrame:
+    """Transfer ``LogRow``s + a (tx, user)->ref map -> balance-change legs.
+
+    Shared by Template A/B (ref from Referral events) and Template C (ref from
+    PSM3 Swap events): +to / -from legs (zero address never tracked), decimal-
+    scaled, ref attached by (tx, user); scan window date(ts) >= start_date AND
+    ts < end_ts.
+    """
     scale = 10 ** t.decimals
     start_day = t.start_date
     recs: list[dict] = []
@@ -159,10 +168,14 @@ def legs_from_rows(t: Target, ref_rows, tr_rows, end_ts: int) -> pd.DataFrame:
             recs.append(_leg(t, to, r, amt, latest_ref.get((tx, to))))
         if frm != events.ZERO_ADDR:
             recs.append(_leg(t, frm, r, -amt, latest_ref.get((tx, frm))))
-
     if not recs:
         return pd.DataFrame()
     return pd.DataFrame(recs)
+
+
+def legs_from_rows(t: Target, ref_rows, tr_rows, end_ts: int) -> pd.DataFrame:
+    """Pure: raw Referral + Transfer ``LogRow``s -> balance-change legs (A/B)."""
+    return transfer_legs(t, tr_rows, latest_referral_from_events(ref_rows), end_ts)
 
 
 def _legs_for_target(t: Target, end_ts: int) -> pd.DataFrame:

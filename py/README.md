@@ -139,7 +139,16 @@ Per-token migration off Dune onto Envio HyperSync:
       windows validated exact (Σ TWA reldiff 0; day_type + segment_duration
       exact; only dust differs). Regression fixtures `susdc_mar` (eth/base/arb)
       and `susdc_jun` (optimism/unichain).
-- [ ] L2 sUSDS via PSM3 (Template C) — `Swap.referralCode` + token `Transfer`
+- [~] **L2 sUSDS via PSM3 (Template C): ported — vs Dune 7877543.** ref_code
+      from PSM3 `Swap.referralCode` (assetOut=sUSDS filtered server-side via the
+      indexed topic2), balance from token `Transfer`. **Arbitrum validated +
+      fixtured** (Σ TWA reldiff 2.6e-10; day_type/segment exact). base/optimism/
+      unichain share the identical code path (base is very high-volume — needs a
+      short window). NB: a self-transfer (from==to) splits into two legs with the
+      same (block, log_index); Dune resolves that tie non-deterministically, so a
+      handful of rows can differ immaterially — HS is arithmetically correct
+      there. The parity test asserts materiality (tight Σ, negligible aggregate
+      diff), not exact per-row equality Dune itself can't guarantee.
 - [ ] USDS staking farms (Template D) — `Staked`/`Withdrawn` + `Referral`
 - [ ] sp\* vaults (Template E; deployment ratio applied downstream)
 - [ ] Layer 2–4 stack on top of TWA: rate application (`rates_dr`), USD conversion

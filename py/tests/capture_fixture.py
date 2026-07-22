@@ -33,9 +33,8 @@ ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT / "py"))
 load_dotenv(ROOT / ".env")
 
-from drhs.sources import template_ab  # noqa: E402
-from run_source import SOURCES, SOURCE_EXCLUDED  # noqa: E402
-from validate import DEFAULT_QUERY, run_dune  # noqa: E402
+from run_source import SPECS  # noqa: E402
+from validate import run_dune  # noqa: E402
 
 FIX_DIR = Path(__file__).parent / "fixtures"
 
@@ -51,28 +50,29 @@ def _parse_date(s: str) -> date:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("source", choices=sorted(SOURCES))
+    ap.add_argument("source", choices=sorted(SPECS))
     ap.add_argument("--end", type=_parse_date, required=True)
     ap.add_argument("--query", type=int, default=None)
     args = ap.parse_args()
-    query_id = args.query or DEFAULT_QUERY[args.source]
-    end_ts = template_ab._end_ts(args.end)
+    spec = SPECS[args.source]
+    query_id = args.query or spec.dune_query
+    end_ts = spec.template._end_ts(args.end)
     end_s = args.end.isoformat()
 
     out = FIX_DIR / f"{args.source}_{end_s}"
     out.mkdir(parents=True, exist_ok=True)
-    targets = SOURCES[args.source]
-    excluded = sorted(SOURCE_EXCLUDED.get(args.source, frozenset()))
+    targets = spec.targets
+    excluded = sorted(spec.excluded)
 
     covered = set()
     for t in targets:
         print(f"[capture] fetching {t.symbol} {t.blockchain} {t.address} ...", flush=True)
-        ref_rows, tr_rows = template_ab.fetch_target_rows(t, end_ts)
+        ref_rows, tr_rows = spec.template.fetch_target_rows(t, end_ts)
         tag = f"{t.blockchain}_{t.address.lower()}"
-        _write_gz(out / f"{tag}.referrals.json.gz", [dataclasses.asdict(r) for r in ref_rows])
+        _write_gz(out / f"{tag}.{spec.ref_kind}.json.gz", [dataclasses.asdict(r) for r in ref_rows])
         _write_gz(out / f"{tag}.transfers.json.gz", [dataclasses.asdict(r) for r in tr_rows])
         covered.add((t.blockchain, t.address.lower()))
-        print(f"  {len(ref_rows)} referrals, {len(tr_rows)} transfers", flush=True)
+        print(f"  {len(ref_rows)} {spec.ref_kind}, {len(tr_rows)} transfers", flush=True)
 
     # Dune golden (server-side filtered to symbols + dt < end).
     symbols = sorted({t.symbol for t in targets})

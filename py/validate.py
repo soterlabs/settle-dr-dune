@@ -34,13 +34,9 @@ load_dotenv(ROOT / ".env")
 
 from drhs import twa  # noqa: E402
 from drhs.sources import template_ab  # noqa: E402
-from run_source import SOURCES, SOURCE_EXCLUDED  # noqa: E402
+from run_source import SPECS, build_source_legs  # noqa: E402
 
 DUNE_BASE = "https://api.dune.com/api/v1"
-DEFAULT_QUERY = {
-    "stusds": 7877544, "susds_eth": 7877542, "susdc": 7877542,
-    "susdc_mar": 7877542, "susdc_jun": 7877542,
-}
 
 
 def _parse_date(s: str) -> date:
@@ -115,7 +111,7 @@ KEYS = ["k_chain", "k_contract", "k_user", "k_dt", "k_ref"]
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("source", choices=sorted(SOURCES))
+    ap.add_argument("source", choices=sorted(SPECS))
     ap.add_argument("--query", type=int, default=None, help="Dune query id (default per source)")
     ap.add_argument("--end", type=_parse_date, default=template_ab.DEFAULT_END)
     ap.add_argument("--dt-max", type=_parse_date, default=None,
@@ -126,16 +122,16 @@ def main() -> int:
     ap.add_argument("--tol", type=float, default=1e-6)
     args = ap.parse_args()
     dt_max = args.dt_max or args.end
-    query_id = args.query or DEFAULT_QUERY.get(args.source)
-    if query_id is None:
-        print(f"no default Dune query for {args.source!r}; pass --query")
-        return 2
+    query_id = args.query or SPECS[args.source].dune_query
 
     print(f"[hs] computing {args.source} TWA end={args.end} ...", flush=True)
-    legs = template_ab.build_legs(
-        SOURCES[args.source], end_date=args.end,
-        excluded=SOURCE_EXCLUDED.get(args.source, frozenset()))
-    hs = twa.compute_twa(legs)
+    legs = build_source_legs(args.source, args.end)
+    # Cap the no-transaction-day fill at the comparison bound: rows with
+    # dt < dt_max are identical whether the flat tail extends to dt_max or to
+    # 2026-06-30, so this avoids generating a huge (discarded) tail for
+    # high-volume tokens without changing the compared rows.
+    fill_through = min(dt_max, date(2026, 6, 30))
+    hs = twa.compute_twa(legs, fill_through=fill_through)
     if hs.empty:
         print("[hs] EMPTY — nothing to validate (source has no data in window).")
         return 1
