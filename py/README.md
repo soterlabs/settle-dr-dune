@@ -98,13 +98,16 @@ are dust rows at the filter boundary, contributing ~nothing to any DR figure.
 
 ## Status
 
-- [x] HyperSync client + event codecs
-- [x] TWA engine (shared SQL tail), validated on **stUSDS** (Template B)
-- [x] Template A/B targets wired: sUSDS eth, sUSDC eth + base/arbitrum/optimism/unichain
-      (same code path; per-target Dune validation pending — sUSDS/sUSDC are large)
-- [ ] Template C (L2 sUSDS via PSM3 `Swap.referralCode` + token `Transfer` balance)
-- [ ] Template D (USDS staking farms: `Staked`/`Withdrawn` + `Referral`)
-- [ ] Template E (sp\* vaults; deployment ratio applied downstream)
-- [ ] Rate application (`rates_dr`), USD conversion (`conversion_*`), monthly rollups,
-      and the per-ref_code combine — the Layer 2–4 stack on top of TWA
+Per-token migration off Dune onto Envio HyperSync:
+
+- [x] HyperSync client + event codecs + TWA engine (shared SQL tail)
+- [x] **stUSDS (Template B): ported to Envio HyperSync — replaces Dune query
+      7877544.** Full-history per-row parity confirmed (see above).
+- [ ] **sUSDS (Template A, eth): in progress** — validate vs Dune 7877542
+- [ ] sUSDC (Template A, eth + base/arbitrum/optimism/unichain) — vs Dune 7877542
+- [ ] L2 sUSDS via PSM3 (Template C) — `Swap.referralCode` + token `Transfer`
+- [ ] USDS staking farms (Template D) — `Staked`/`Withdrawn` + `Referral`
+- [ ] sp\* vaults (Template E; deployment ratio applied downstream)
+- [ ] Layer 2–4 stack on top of TWA: rate application (`rates_dr`), USD conversion
+      (`conversion_*`), monthly rollups, and the per-ref_code combine
 ```
