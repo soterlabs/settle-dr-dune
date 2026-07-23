@@ -80,9 +80,6 @@ class SyntheticProgram:
         d = datetime.fromtimestamp(ts, tz=timezone.utc).date()
         return (self.start is None or d >= self.start) and (self.end is None or d < self.end)
 
-    def topics(self) -> list[str]:
-        return [events.addr_to_topic(a) for a in sorted(self.contracts)]
-
 
 # CowSwap GPv2Settlement — same address on every chain it is deployed to.
 # Assumption (verified on ethereum): sUSDS only leaves the settlement contract
@@ -126,8 +123,14 @@ def synthetic_referrals(
     if not deliveries:
         return {}
 
-    # pass 2: net token delta per (tx, wallet) over the delivery txs only
-    net: dict[tuple[str, str], float] = {}
+    # pass 2: net token delta per (tx, wallet) over the delivery txs only.
+    # Kept in exact int wei: token amounts (1e18+) exceed float64's 2**53
+    # integer range, and rounding residues on a perfect forwarder (in == out)
+    # can come out positive — which would falsely tag a solver/router.
+    # NB mints (0x0 -> wallet) are not deliveries: on-chain audit shows solvers
+    # always mint to themselves/intermediaries and the settlement then
+    # transfers to the user, so the delivery edge is the reliable signal.
+    net: dict[tuple[str, str], int] = {}
     for r in tr_rows:
         tx = r.transaction_hash
         if tx not in deliveries:
@@ -136,14 +139,14 @@ def synthetic_referrals(
         frm = events.topic_to_addr(r.topic1)
         to = events.topic_to_addr(r.topic2)
         if to != events.ZERO_ADDR:
-            net[(tx, to)] = net.get((tx, to), 0.0) + amt
+            net[(tx, to)] = net.get((tx, to), 0) + amt
         if frm != events.ZERO_ADDR:
-            net[(tx, frm)] = net.get((tx, frm), 0.0) - amt
+            net[(tx, frm)] = net.get((tx, frm), 0) - amt
 
     out: dict[tuple[str, str], tuple[int, int]] = {}
     for tx, rows in deliveries.items():
         for log_index, wallet, p in rows:
-            if net.get((tx, wallet), 0.0) <= 0:
+            if net.get((tx, wallet), 0) <= 0:
                 continue  # forwarder (solver/router/hop) — not the final holder
             key = (tx, wallet)
             prev = out.get(key)

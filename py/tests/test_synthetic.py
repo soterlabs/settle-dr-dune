@@ -119,6 +119,24 @@ def test_end_to_end_tag_starts_and_ends():
     assert by_day["2025-01-03"] == 777      # ffill keeps the real code
 
 
+def test_net_delta_exact_int_no_float_residue():
+    """A perfect forwarder must never be tagged, even when raw wei amounts
+    exceed float64's 2**53 exact-integer range (real sUSDS transfers are
+    1e18-1e23 wei). With float accumulation, receive 2**53+3 then send
+    2**53+1 and 2 leaves a spurious +2 residue -> false tag."""
+    def _tr_wei(tx, li, frm, to, wei):
+        return LogRow(block_number=100, log_index=li, block_time=DAY,
+                      address=SUSDS.address, topic0=events.TRANSFER_TOPIC0,
+                      topic1=events.addr_to_topic(frm), topic2=events.addr_to_topic(to),
+                      topic3=None, data="0x" + format(wei, "064x"), transaction_hash=tx)
+    rows = [
+        _tr_wei("0xt1", 1, S, R, 2**53 + 3),   # delivery to forwarder R
+        _tr_wei("0xt1", 2, R, D, 2**53 + 1),   # R forwards everything...
+        _tr_wei("0xt1", 3, R, D, 2),           # ...in two hops. True net = 0.
+    ]
+    assert synthetic_referrals(rows, (COWSWAP,)) == {}
+
+
 def test_eligibility_window():
     """Deliveries outside [start, end) are not tagged."""
     windowed = SyntheticProgram("w", 1003, frozenset({S}),
