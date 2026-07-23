@@ -48,13 +48,14 @@ SOURCE_MONTHLY = {
 }
 
 
-def source_monthly(key: str, end: date, build_legs) -> pd.DataFrame:
+def source_monthly(key: str, end: date, build_legs, *, engine: str = "vector") -> pd.DataFrame:
     """Compute one source's monthly DR. ``build_legs(src, end)`` fetches TWA legs
-    (injected to avoid importing run_source here)."""
+    (injected to avoid importing run_source here). ``engine`` selects the TWA
+    implementation ("vector" fast / "loop" memory-frugal); see twa.compute."""
     srcs, reclass, conv_builder, is_sp = SOURCE_MONTHLY[key]
     fill = min(end, date(2026, 6, 30))
     legs = pd.concat([build_legs(s, end) for s in srcs], ignore_index=True)
-    tw = twa.compute_twa(legs, fill_through=fill)
+    tw = twa.compute(legs, fill_through=fill, engine=engine)
     if is_sp:
         dep = deployment.deployment_ratios(tw, end=fill)
         dep_map = {(r.blockchain, r.vault_symbol, r.dt): r.deployment_ratio for r in dep.itertuples()}

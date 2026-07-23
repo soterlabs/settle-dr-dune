@@ -37,14 +37,18 @@ def main() -> int:
     ap.add_argument("--sources", default=",".join(pipeline.SOURCE_MONTHLY),
                     help="comma-separated subset of: " + ",".join(pipeline.SOURCE_MONTHLY))
     ap.add_argument("--end", type=_d, default=date(2026, 7, 1))
+    ap.add_argument("--engine", choices=("vector", "loop"), default="vector",
+                    help="TWA engine: 'vector' (fast) or 'loop' (memory-frugal, "
+                         "for high-volume sources on a small box)")
     ap.add_argument("--out", type=Path, default=ROOT / "hypersync-results" / "dr")
     args = ap.parse_args()
 
     per_source = {}
     for key in args.sources.split(","):
         key = key.strip()
-        print(f"[dr] computing monthly DR for {key} ...", flush=True)
-        per_source[key] = pipeline.source_monthly(key, args.end, build_source_legs)
+        print(f"[dr] computing monthly DR for {key} (engine={args.engine}) ...", flush=True)
+        per_source[key] = pipeline.source_monthly(key, args.end, build_source_legs,
+                                                  engine=args.engine)
         print(f"[dr]   {len(per_source[key])} monthly rows", flush=True)
 
     out = pipeline.combine(per_source)

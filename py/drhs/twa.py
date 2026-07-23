@@ -61,6 +61,35 @@ def _midnight_ts(d: date) -> int:
 
 
 # ============================================================================
+# Engine dispatch
+# ============================================================================
+def compute(
+    legs: pd.DataFrame,
+    *,
+    fill_through: date = date(2026, 6, 30),
+    emit_from: date | None = None,
+    engine: str = "vector",
+) -> pd.DataFrame:
+    """Compute the TWA frame with the chosen engine.
+
+    ``engine="vector"`` (default) is the fast pandas implementation; ``"loop"``
+    is the per-user reference — slower but with a flat, tiny memory footprint,
+    which is what you want on a memory-constrained box (high-volume sources
+    materialize several full-size frames at once under the vectorized engine).
+    Both are byte-equivalent. For the loop engine ``emit_from`` is applied as a
+    post-filter (balances are still reconstructed from the full leg history).
+    """
+    if engine == "loop":
+        df = compute_twa_loop(legs, fill_through=fill_through)
+        if emit_from is not None and len(df):
+            df = df[df["dt"] >= emit_from].reset_index(drop=True)
+        return df
+    if engine != "vector":
+        raise ValueError(f"unknown TWA engine {engine!r} (expected 'vector' or 'loop')")
+    return compute_twa(legs, fill_through=fill_through, emit_from=emit_from)
+
+
+# ============================================================================
 # Vectorized implementation
 # ============================================================================
 def compute_twa(
