@@ -15,9 +15,9 @@ Each source's monthly config mirrors its dr_rewards_monthly_*.sql:
   sp            sp_vaults                   130/131/132       sp rate + deploy
 
 NOTE: high-volume sources (sUSDC, sp, L2 PSM3) over full history produce
-millions of per-user-day TWA rows; the pure-Python TWA engine is the bottleneck
-there (fine for a windowed run; a vectorized engine is the optimization for a
-full-history production run).
+millions of per-user-day TWA rows. The TWA engine processes one user at a time,
+so memory stays flat, but wall-clock scales with total rows — a full-history
+production run over these sources is slow (fine for a windowed run).
 """
 
 from __future__ import annotations
@@ -48,14 +48,13 @@ SOURCE_MONTHLY = {
 }
 
 
-def source_monthly(key: str, end: date, build_legs, *, engine: str = "vector") -> pd.DataFrame:
+def source_monthly(key: str, end: date, build_legs) -> pd.DataFrame:
     """Compute one source's monthly DR. ``build_legs(src, end)`` fetches TWA legs
-    (injected to avoid importing run_source here). ``engine`` selects the TWA
-    implementation ("vector" fast / "loop" memory-frugal); see twa.compute."""
+    (injected to avoid importing run_source here)."""
     srcs, reclass, conv_builder, is_sp = SOURCE_MONTHLY[key]
     fill = min(end, date(2026, 6, 30))
     legs = pd.concat([build_legs(s, end) for s in srcs], ignore_index=True)
-    tw = twa.compute(legs, fill_through=fill, engine=engine)
+    tw = twa.compute_twa(legs, fill_through=fill)
     if is_sp:
         dep = deployment.deployment_ratios(tw, end=fill)
         dep_map = {(r.blockchain, r.vault_symbol, r.dt): r.deployment_ratio for r in dep.itertuples()}

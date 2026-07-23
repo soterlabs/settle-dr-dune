@@ -86,17 +86,13 @@ def main() -> int:
     ap.add_argument("source", choices=sorted(SPECS))
     ap.add_argument("--end", type=_parse_date, default=template_ab.DEFAULT_END,
                     help="scan cutoff (exclusive); default 2026-07-01")
-    ap.add_argument("--engine", choices=("vector", "loop"), default="vector",
-                    help="TWA engine: 'vector' (fast) or 'loop' (memory-frugal, "
-                         "for high-volume sources on a small box)")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
 
     print(f"[{args.source}] fetching events via HyperSync ...", flush=True)
     legs = build_source_legs(args.source, args.end)
-    print(f"[{args.source}] {len(legs)} balance-change legs; "
-          f"computing TWA (engine={args.engine}) ...", flush=True)
-    df = twa.compute(legs, engine=args.engine)
+    print(f"[{args.source}] {len(legs)} balance-change legs; computing TWA ...", flush=True)
+    df = twa.compute_twa(legs)
     print(f"[{args.source}] {len(df)} TWA rows "
           f"({df['user_addr'].nunique() if len(df) else 0} users)", flush=True)
 
