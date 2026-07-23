@@ -38,13 +38,19 @@ class SourceSpec:
     dune_query: int
     ref_kind: str = "referrals"   # label of the first fetched event group: referrals | swaps
     excluded: frozenset = field(default_factory=frozenset)
+    # synthetic aggregator programs (template A only): pseudo-referral tagging
+    # of aggregator deliveries — see template_ab.SyntheticProgram.
+    synthetic: tuple = ()
 
 
 SPECS: dict[str, SourceSpec] = {
     # Template B — stUSDS (no exclusions). Full-history parity confirmed.
     "stusds": SourceSpec(template_ab, [template_ab.STUSDS], 7877544),
-    # Template A — sUSDS / sUSDC (protocol-holder exclusions).
-    "susds_eth": SourceSpec(template_ab, [template_ab.SUSDS_ETH], 7877542, excluded=_EXC),
+    # Template A — sUSDS / sUSDC (protocol-holder exclusions). sUSDS eth also
+    # carries the CowSwap 1003 synthetic program (pseudo-referrals for GPv2
+    # settlement deliveries — docs/cowswap-1003-double-attribution.md).
+    "susds_eth": SourceSpec(template_ab, [template_ab.SUSDS_ETH], 7877542, excluded=_EXC,
+                            synthetic=(template_ab.COWSWAP,)),
     "susdc": SourceSpec(template_ab, template_ab.TEMPLATE_A_SUSDC, 7877542, excluded=_EXC),
     "susdc_mar": SourceSpec(
         template_ab, [template_ab.SUSDC_ETH, template_ab.SUSDC_BASE, template_ab.SUSDC_ARB],
@@ -72,9 +78,12 @@ SPECS: dict[str, SourceSpec] = {
 }
 
 
-def build_source_legs(name: str, end_date: date):
+def build_source_legs(name: str, end_date: date, *, include_synthetic: bool = True):
+    """``include_synthetic=False`` builds the pre-synthetic (Dune-parity) legs —
+    used by validate.py, since the Dune queries carry no synthetic programs."""
     s = SPECS[name]
-    return s.template.build_legs(s.targets, end_date=end_date, excluded=s.excluded)
+    kw = {"synthetic": s.synthetic} if (s.synthetic and include_synthetic) else {}
+    return s.template.build_legs(s.targets, end_date=end_date, excluded=s.excluded, **kw)
 
 
 def _parse_date(s: str) -> date:

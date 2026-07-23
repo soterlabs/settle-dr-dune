@@ -50,6 +50,118 @@ TEMPLATE_A_EXCLUDED: frozenset[str] = frozenset({
 })
 
 
+# --- Synthetic aggregator programs (pseudo-referrals) -------------------------
+# Aggregators (CowSwap, Paraswap, ...) never emit a user-level Referral event —
+# their Referral events, when present, land on the router itself (see
+# docs/cowswap-1003-double-attribution.md). Users receive the token as a plain
+# Transfer out of the aggregator's delivery contract. A SyntheticProgram turns
+# those deliveries into pseudo-referral legs *inside the same attribution
+# stream* as real Referral events, so the tag (a) relabels balance instead of
+# double counting it, and (b) is terminated by any later attribution signal
+# (real code or another program's tag) via the TWA engine's last-wins ffill.
+#
+# Tagging rule per delivery tx T: wallet W gets `ref_code` iff W received the
+# token FROM a program contract in T AND W's net token delta across ALL of T's
+# transfers is positive. The net-delta guard drops solvers / routers / the
+# settlement itself, which only forward within the tx (audit: the strict
+# Deposit.owner signal tags 46/46 intermediary contracts and zero end users).
+# A real Referral for the same (tx, wallet) always wins over a pseudo one.
+@dataclass(frozen=True)
+class SyntheticProgram:
+    name: str
+    ref_code: int
+    contracts: frozenset[str]     # delivery contracts, lower-cased
+    # Eligibility window (Atlas requires explicit program start/termination).
+    # Deliveries outside [start, end) are not tagged; None = unbounded.
+    start: date | None = None
+    end: date | None = None
+
+    def active_at(self, ts: int) -> bool:
+        d = datetime.fromtimestamp(ts, tz=timezone.utc).date()
+        return (self.start is None or d >= self.start) and (self.end is None or d < self.end)
+
+    def topics(self) -> list[str]:
+        return [events.addr_to_topic(a) for a in sorted(self.contracts)]
+
+
+# CowSwap GPv2Settlement — same address on every chain it is deployed to.
+# Assumption (verified on ethereum): sUSDS only leaves the settlement contract
+# during `settle()`/`swap()` executions, so no separate Trade-event check is
+# needed to recognise a settlement tx.
+COWSWAP = SyntheticProgram(
+    "cowswap", 1003,
+    frozenset({"0x9008d19f58aabd9ed0d60971565aa8510560ab41"}),
+)
+
+
+def synthetic_referrals(
+    tr_rows, programs: tuple[SyntheticProgram, ...],
+) -> dict[tuple[str, str], tuple[int, int]]:
+    """Pseudo-referrals from aggregator deliveries: {(tx, wallet): (log_index, code)}.
+
+    ``tr_rows`` is the full Transfer ``LogRow`` set for one target token.
+    Same shape as ``latest_referral_from_events`` so the two merge trivially.
+    Later deliveries win within a tx (mirrors latest-by-log_index for real
+    Referral events).
+    """
+    if not programs:
+        return {}
+    by_contract: dict[str, SyntheticProgram] = {}
+    for p in programs:
+        for a in p.contracts:
+            by_contract[a] = p
+
+    # pass 1: deliveries (program contract -> wallet) per tx
+    deliveries: dict[str, list[tuple[int, str, SyntheticProgram]]] = {}
+    for r in tr_rows:
+        frm = events.topic_to_addr(r.topic1)
+        p = by_contract.get(frm)
+        if p is None or r.transaction_hash is None or not p.active_at(r.block_time):
+            continue
+        to = events.topic_to_addr(r.topic2)
+        if to == events.ZERO_ADDR or to in by_contract:
+            continue
+        deliveries.setdefault(r.transaction_hash, []).append((r.log_index, to, p))
+
+    if not deliveries:
+        return {}
+
+    # pass 2: net token delta per (tx, wallet) over the delivery txs only
+    net: dict[tuple[str, str], float] = {}
+    for r in tr_rows:
+        tx = r.transaction_hash
+        if tx not in deliveries:
+            continue
+        amt = events.transfer_value(r.data)
+        frm = events.topic_to_addr(r.topic1)
+        to = events.topic_to_addr(r.topic2)
+        if to != events.ZERO_ADDR:
+            net[(tx, to)] = net.get((tx, to), 0.0) + amt
+        if frm != events.ZERO_ADDR:
+            net[(tx, frm)] = net.get((tx, frm), 0.0) - amt
+
+    out: dict[tuple[str, str], tuple[int, int]] = {}
+    for tx, rows in deliveries.items():
+        for log_index, wallet, p in rows:
+            if net.get((tx, wallet), 0.0) <= 0:
+                continue  # forwarder (solver/router/hop) — not the final holder
+            key = (tx, wallet)
+            prev = out.get(key)
+            if prev is None or log_index > prev[0]:
+                out[key] = (log_index, p.ref_code)
+    return out
+
+
+def merge_referrals(
+    real: dict[tuple[str, str], tuple[int, int]],
+    pseudo: dict[tuple[str, str], tuple[int, int]],
+) -> dict[tuple[str, str], tuple[int, int]]:
+    """Real Referral events always beat pseudo-referrals for the same (tx, user)."""
+    merged = dict(pseudo)
+    merged.update(real)
+    return merged
+
+
 # --- Target matrix (queries/README.md §Target matrix) ------------------------
 # NB: sUSDC is 18 decimals on EVERY chain (verified via tokens.erc20), not 6.
 STUSDS = Target("ethereum", "stUSDS", "0x99cd4ec3f88a45940936f469e4bb72a2a701eeb9", 18, date(2024, 9, 1))
@@ -86,6 +198,7 @@ def _end_ts(end_date: date) -> int:
 def build_legs(
     targets: list[Target], *, end_date: date = DEFAULT_END,
     excluded: frozenset[str] = frozenset(),
+    synthetic: tuple[SyntheticProgram, ...] = (),
 ) -> pd.DataFrame:
     """Balance-change legs for ``targets``.
 
@@ -95,8 +208,11 @@ def build_legs(
     ``user_addr not in (select addr from excluded_addresses)`` filter — other
     users' legs (e.g. a transfer *from* an excluded contract *to* a real user)
     are untouched.
+
+    ``synthetic`` programs add pseudo-referral tags for aggregator deliveries
+    (see ``SyntheticProgram``); applied to every target in the list.
     """
-    frames = [_legs_for_target(t, _end_ts(end_date)) for t in targets]
+    frames = [_legs_for_target(t, _end_ts(end_date), synthetic) for t in targets]
     frames = [f for f in frames if not f.empty]
     if not frames:
         return pd.DataFrame(columns=[
@@ -185,14 +301,26 @@ def transfer_legs(
     return pd.DataFrame(recs)
 
 
-def legs_from_rows(t: Target, ref_rows, tr_rows, end_ts: int) -> pd.DataFrame:
-    """Pure: raw Referral + Transfer ``LogRow``s -> balance-change legs (A/B)."""
-    return transfer_legs(t, tr_rows, latest_referral_from_events(ref_rows), end_ts)
+def legs_from_rows(
+    t: Target, ref_rows, tr_rows, end_ts: int,
+    synthetic: tuple[SyntheticProgram, ...] = (),
+) -> pd.DataFrame:
+    """Pure: raw Referral + Transfer ``LogRow``s -> balance-change legs (A/B).
+
+    With ``synthetic`` programs, aggregator deliveries contribute
+    pseudo-referral tags; a real Referral for the same (tx, user) wins.
+    """
+    latest = latest_referral_from_events(ref_rows)
+    if synthetic:
+        latest = merge_referrals(latest, synthetic_referrals(tr_rows, synthetic))
+    return transfer_legs(t, tr_rows, latest, end_ts)
 
 
-def _legs_for_target(t: Target, end_ts: int) -> pd.DataFrame:
+def _legs_for_target(
+    t: Target, end_ts: int, synthetic: tuple[SyntheticProgram, ...] = (),
+) -> pd.DataFrame:
     ref_rows, tr_rows = fetch_target_rows(t, end_ts)
-    return legs_from_rows(t, ref_rows, tr_rows, end_ts)
+    return legs_from_rows(t, ref_rows, tr_rows, end_ts, synthetic)
 
 
 def _leg(t: Target, user: str, r, amount: float, ref: tuple[int, int] | None) -> dict:
