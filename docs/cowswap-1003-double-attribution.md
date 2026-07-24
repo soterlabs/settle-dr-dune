@@ -142,11 +142,11 @@ The fix is implemented in `py/drhs/sources/template_ab.py`
 (`include_synthetic=False`) since the Dune queries carry no 1003.
 
 Measured on the full sUSDS-eth history (668,622 transfers, 13,469 referrals;
-10,753 pseudo-referral tags on 1,148 wallets; settled window < 2026-07-01),
+10,753 pseudo-referral tags on 1,144 wallets; settled window < 2026-07-01),
 by diffing the source with/without the program (only affected wallets can
 change, so the diff is exact):
 
-**1003 DR (USD/month), Sep 2024 – Jun 2026: $885,124 total.** Recent months:
+**1003 DR (USD/month), Sep 2024 – Jun 2026: $885,145 total.** Recent months:
 Dec 2025 $90.1k, Jan 2026 $75.6k, Feb $63.9k, Mar $59.0k, Apr $41.3k,
 May $40.9k, Jun $27.9k.
 
@@ -155,13 +155,13 @@ unchanged, net = $0.00):**
 
 | ref_code | delta (USD) | share |
 |---|---|---|
-| 99 untagged | −691,159 | 78.1% |
+| 99 untagged | −691,180 | 78.1% |
 | 128 Spark.lend | −116,768 | 13.2% |
 | 1 | −38,797 | 4.4% |
 | 0 | −25,221 | 2.8% |
 | 1002 DeFiSaver | −10,282 | 1.2% |
 | 1001 Summer.fi | −2,898 | 0.3% |
-| **1003 CowSwap** | **+885,124** | |
+| **1003 CowSwap** | **+885,145** | |
 
 No same-tx conflicts between real Referrals and pseudo-referrals occurred
 (0 overrides). Tokens other than sUSDS-eth are untouched in phase 1.
