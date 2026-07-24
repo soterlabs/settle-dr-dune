@@ -28,7 +28,8 @@ from drhs import events, twa  # noqa: E402
 from drhs.hypersync import LogRow  # noqa: E402
 from drhs.sources import template_ab  # noqa: E402
 from drhs.sources.template_ab import (  # noqa: E402
-    COWSWAP, SyntheticProgram, merge_referrals, synthetic_referrals,
+    COWSWAP, REROUTED_CODES, SyntheticProgram, merge_referrals,
+    rerouted_referrals, synthetic_referrals,
 )
 
 SUSDS = template_ab.SUSDS_ETH
@@ -181,6 +182,79 @@ def test_mint_to_forwarder_no_warning(caplog):
         tags = synthetic_referrals(rows, (COWSWAP,))
     assert tags == {("0xt1", A): (3, 1003)}
     assert not any("mint-path gap" in m for m in caplog.messages)
+
+
+# --- re-routed intermediary codes (Paraswap 1004 / 1inch 4011 shape) ----------
+
+def test_reroute_forwarder_code_to_recipient():
+    """Referral(1004) lands on router R (net 0); R delivers to A -> A gets 1004."""
+    tr = [_tr("0xt1", 2, R, A, 100.0)]              # router forwards to user
+    rf = [_ref("0xt1", 1, R, 1004)]                 # referral owned by the router
+    tags = rerouted_referrals(rf, tr, REROUTED_CODES)
+    assert tags == {("0xt1", A): (2, 1004)}
+
+
+def test_vault_shape_not_rerouted():
+    """Owner that RETAINS the balance (net > 0) keeps its own attribution —
+    the Yearn-vault shape must never be re-routed."""
+    tr = [_tr("0xt1", 2, D, R, 100.0),              # vault R receives and keeps
+          _tr("0xt1", 3, R, A, 10.0)]               # small payout to A
+    rf = [_ref("0xt1", 1, R, 1004)]
+    assert rerouted_referrals(rf, tr, REROUTED_CODES) == {}
+
+
+def test_reroute_only_allowlisted_codes():
+    """Non-allowlisted intermediary codes are left exactly as they are."""
+    tr = [_tr("0xt1", 2, R, A, 100.0)]
+    rf = [_ref("0xt1", 1, R, 1007)]                 # yearn: not in the allowlist
+    assert rerouted_referrals(rf, tr, REROUTED_CODES) == {}
+
+
+def test_reroute_skips_forwarding_recipient():
+    """Recipient that itself forwards on (net 0) is a hop, not the end user."""
+    tr = [_tr("0xt1", 2, R, D, 100.0),              # router -> hop D
+          _tr("0xt1", 3, D, A, 100.0)]              # hop D -> user A
+    rf = [_ref("0xt1", 1, R, 1004)]
+    tags = rerouted_referrals(rf, tr, REROUTED_CODES)
+    assert ("0xt1", D) not in tags                  # net 0 -> not tagged
+    assert tags == {}                               # A didn't receive FROM the owner
+
+
+def test_reroute_real_user_referral_wins_and_beats_pseudo():
+    """Precedence: real user Referral > re-routed code > delivery pseudo-tag."""
+    # tx1: user E has their OWN referral -> re-routed 1004 must not override it.
+    tr1 = [_tr("0xt1", 2, R, E, 50.0)]
+    rf1 = [_ref("0xt1", 1, R, 1004), _ref("0xt1", 3, E, 777)]
+    legs = template_ab.legs_from_rows(SUSDS, rf1, tr1, DAY + 86400,
+                                      (COWSWAP,), REROUTED_CODES)
+    e_ref = legs[legs["user_addr"] == E]["ref_code"].dropna().unique()
+    assert list(e_ref) == [777]
+    # tx2: cowswap delivery AND a re-routed 1004 for the same user -> 1004 wins
+    # (re-route carries explicit on-chain code evidence).
+    tr2 = [_tr("0xt2", 2, S, A, 30.0),              # cowswap delivery -> pseudo 1003
+           _tr("0xt2", 3, R, A, 20.0)]              # paraswap router delivery
+    rf2 = [_ref("0xt2", 1, R, 1004)]
+    legs2 = template_ab.legs_from_rows(SUSDS, rf2, tr2, DAY + 86400,
+                                       (COWSWAP,), REROUTED_CODES)
+    a_ref = legs2[legs2["user_addr"] == A]["ref_code"].dropna().unique()
+    assert list(a_ref) == [1004]
+
+
+def test_reroute_end_to_end_terminates_cowswap_tag():
+    """The reported scenario: CowSwap buy (1003), later Paraswap buy -> the
+    re-routed 1004 ENDS the 1003 tag instead of double counting."""
+    day2 = DAY + 86400
+    tr = [_tr("0xt1", 1, S, A, 100.0, block=100, ts=DAY),        # cowswap
+          _tr("0xt5", 2, R, A, 50.0, block=200, ts=day2)]        # paraswap
+    rf = [_ref("0xt5", 1, R, 1004, block=200, ts=day2)]
+    legs = template_ab.legs_from_rows(SUSDS, rf, tr, day2 + 86400,
+                                      (COWSWAP,), REROUTED_CODES)
+    out = twa.compute_twa(legs, fill_through=date(2025, 1, 3))
+    by_day = {str(r.dt)[:10]: int(r.ref_code)
+              for r in out[out["user_addr"] == A].itertuples()}
+    assert by_day["2025-01-01"] == 1003
+    assert by_day["2025-01-02"] == 1004     # paraswap ends the cowswap tag
+    assert by_day["2025-01-03"] == 1004
 
 
 def test_excluded_contract_tag_produces_no_legs():

@@ -88,21 +88,38 @@ This is a registry entry — no new code:
    see the "Implemented + measured" section of the CowSwap doc for the
    template. This is what ops signs off on (requirement 4).
 
-### B. Executor-mediated aggregator (the 1inch / 0x-Settler shape)
+### B. Referral-emitting aggregator (the Paraswap / 1inch shape) — IMPLEMENTED
 
-Users receive the token from **per-solver executor contracts** whose addresses
-are unbounded; only the tx *entrypoint* (`tx.to`) identifies the program
-(1inch: AggregationRouter v6 `0x1111…2a65`, Fusion settlement `0x2d83…aded`).
+These aggregators deposit into the vault themselves and pass their partner
+code, so a **real `Referral(code)` event fires — owned by the
+router/executor**, not the end user (all 926 `Referral(1004)` events land on
+Paraswap routers; all 426 `Referral(4011)` events on 1inch executors). The
+mechanism (`template_ab.rerouted_referrals`, allowlist
+`template_ab.REROUTED_CODES`): when an allowlisted code lands on owner O in
+tx T and O is a **net-zero/negative forwarder** in T, the code is re-attached
+to the net-positive recipients of transfers *from O* in T. If O is itself
+net-positive — a partner vault holding for its users, like Yearn's 1007
+contracts (16.8M sUSDS retained) — nothing is re-routed.
 
-Not implemented yet. The extension is small and should be built when the
-first such program is approved:
+Adding such a partner = **adding its code to `REROUTED_CODES`**. No address
+registry: the tag is anchored to the emitting intermediary itself, so router
+redeployments are picked up automatically. Precedence per (tx, user): real
+user Referral > re-routed code > delivery pseudo-tag. This is the corrected
+descendant of the removed `referral_per_tx_fallback` CTE.
+
+### C. Referral-less aggregator without a fixed delivery contract (0x Settler / Enso shape)
+
+No Referral events at all (shape B unavailable) *and* delivery comes from
+rotating/per-user contracts (shape A unavailable). Only the tx *entrypoint*
+(`tx.to`) identifies the program. Not implemented; build when the first such
+program is approved:
 
 - add `entrypoints: frozenset[str]` to `SyntheticProgram`;
 - collect program tx hashes with one HyperSync **transaction** query
   (`{"transactions": [{"to": [...]}]}`, fields `hash`,`block_number`) over the
   scan window;
-- tag **net-positive recipients** among those txs' transfers — rules 2 and 3
-  and all merge/precedence semantics unchanged.
+- tag **net-positive recipients** among those txs' transfers — all other
+  rules and merge/precedence semantics unchanged.
 
 Known gap to accept (or supplement with executor discovery): contract-wallet /
 ERC-4337 users don't have `tx.to = router`.

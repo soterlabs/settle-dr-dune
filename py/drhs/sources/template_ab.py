@@ -191,6 +191,93 @@ def merge_referrals(
     return merged
 
 
+# --- Re-routed referral codes (aggregators that DO emit Referral events) ------
+# Some aggregators deposit into the vault themselves and pass their partner
+# code, so a real Referral event fires — but its `owner` is the router/executor
+# that received the minted shares, not the end user (on-chain: all 926
+# Referral(1004) events land on Paraswap routers; all 426 Referral(4011)
+# events on 1inch executors). The router forwards the token to the user in the
+# same tx, so in the plain stream the code sticks to a net-zero intermediary
+# and the user stays untagged.
+#
+# For the allowlisted codes below, the code is RE-ROUTED: when a Referral for
+# such a code lands on owner O in tx T and O is a net-zero/negative forwarder
+# in T, the code is re-attached to the net-positive recipients of transfers
+# FROM O in T. If O is itself net-positive (a partner vault holding for its
+# users — e.g. Yearn's 1007 vaults retain 16.8M sUSDS), nothing is re-routed:
+# the vault keeps its own attribution.
+#
+# This is the corrected version of the removed `referral_per_tx_fallback` CTE
+# (see twa_susds_susdc_erc4626.sql): anchored to the emitting intermediary and
+# its delivery edge, instead of re-tagging by (tx, contract) alone. Being
+# anchored to real events, it needs no router address registry and survives
+# router redeployments. Allowlisted per partner because re-routing shifts DR
+# attribution (a payout-policy decision, not a default).
+REROUTED_CODES: frozenset[int] = frozenset({
+    1004,   # Paraswap (Augustus v5/v6.x, Delta)
+    4011,   # 1inch (AggregationRouter v6 / Fusion executors)
+})
+
+
+def rerouted_referrals(
+    ref_rows, tr_rows, codes: frozenset[int],
+) -> dict[tuple[str, str], tuple[int, int]]:
+    """Re-route intermediary-owned referral codes to the end recipients.
+
+    Returns {(tx, wallet): (log_index, code)} in the shape of
+    ``latest_referral_from_events``. Later deliveries win within a tx.
+    """
+    if not codes:
+        return {}
+    # 1. allowlisted referral events per tx: owner -> latest code by log_index
+    owner_code: dict[str, dict[str, tuple[int, int]]] = {}   # tx -> owner -> (li, code)
+    for r in ref_rows:
+        code = events.referral_code_from_topic(r.topic1)
+        if code not in codes or r.transaction_hash is None:
+            continue
+        owner = events.topic_to_addr(r.topic2)
+        per_tx = owner_code.setdefault(r.transaction_hash, {})
+        prev = per_tx.get(owner)
+        if prev is None or r.log_index > prev[0]:
+            per_tx[owner] = (r.log_index, code)
+    if not owner_code:
+        return {}
+
+    # 2. net deltas + deliveries out of the referral owners, over those txs
+    net: dict[tuple[str, str], int] = {}
+    deliveries: dict[str, list[tuple[int, str, str]]] = {}   # tx -> [(li, from_owner, to)]
+    for r in tr_rows:
+        tx = r.transaction_hash
+        owners = owner_code.get(tx)
+        if owners is None:
+            continue
+        amt = events.transfer_value(r.data)
+        frm = events.topic_to_addr(r.topic1)
+        to = events.topic_to_addr(r.topic2)
+        if to != events.ZERO_ADDR:
+            net[(tx, to)] = net.get((tx, to), 0) + amt
+        if frm != events.ZERO_ADDR:
+            net[(tx, frm)] = net.get((tx, frm), 0) - amt
+        if frm in owners and to != events.ZERO_ADDR:
+            deliveries.setdefault(tx, []).append((r.log_index, frm, to))
+
+    # 3. re-route forwarder-owned codes to net-positive delivery recipients
+    out: dict[tuple[str, str], tuple[int, int]] = {}
+    for tx, rows in deliveries.items():
+        owners = owner_code[tx]
+        for log_index, owner, wallet in rows:
+            if net.get((tx, owner), 0) > 0:
+                continue  # owner retains (partner vault) — keep its attribution
+            if wallet in owners or net.get((tx, wallet), 0) <= 0:
+                continue  # hop to another intermediary / forwarder
+            code = owners[owner][1]
+            key = (tx, wallet)
+            prev = out.get(key)
+            if prev is None or log_index > prev[0]:
+                out[key] = (log_index, code)
+    return out
+
+
 # --- Target matrix (queries/README.md §Target matrix) ------------------------
 # NB: sUSDC is 18 decimals on EVERY chain (verified via tokens.erc20), not 6.
 STUSDS = Target("ethereum", "stUSDS", "0x99cd4ec3f88a45940936f469e4bb72a2a701eeb9", 18, date(2024, 9, 1))
@@ -228,6 +315,7 @@ def build_legs(
     targets: list[Target], *, end_date: date = DEFAULT_END,
     excluded: frozenset[str] = frozenset(),
     synthetic: tuple[SyntheticProgram, ...] = (),
+    reroute: frozenset[int] = frozenset(),
 ) -> pd.DataFrame:
     """Balance-change legs for ``targets``.
 
@@ -239,9 +327,11 @@ def build_legs(
     are untouched.
 
     ``synthetic`` programs add pseudo-referral tags for aggregator deliveries
-    (see ``SyntheticProgram``); applied to every target in the list.
+    (see ``SyntheticProgram``); ``reroute`` re-attaches intermediary-owned
+    referral codes to end recipients (see ``REROUTED_CODES``). Both are
+    applied to every target in the list.
     """
-    frames = [_legs_for_target(t, _end_ts(end_date), synthetic) for t in targets]
+    frames = [_legs_for_target(t, _end_ts(end_date), synthetic, reroute) for t in targets]
     frames = [f for f in frames if not f.empty]
     if not frames:
         return pd.DataFrame(columns=[
@@ -333,23 +423,32 @@ def transfer_legs(
 def legs_from_rows(
     t: Target, ref_rows, tr_rows, end_ts: int,
     synthetic: tuple[SyntheticProgram, ...] = (),
+    reroute: frozenset[int] = frozenset(),
 ) -> pd.DataFrame:
     """Pure: raw Referral + Transfer ``LogRow``s -> balance-change legs (A/B).
 
-    With ``synthetic`` programs, aggregator deliveries contribute
-    pseudo-referral tags; a real Referral for the same (tx, user) wins.
+    ``synthetic`` programs contribute delivery pseudo-referrals; ``reroute``
+    re-attaches intermediary-owned codes to end recipients. Precedence for the
+    same (tx, user): real Referral > re-routed code > delivery pseudo-tag.
     """
     latest = latest_referral_from_events(ref_rows)
+    extra: dict[tuple[str, str], tuple[int, int]] = {}
     if synthetic:
-        latest = merge_referrals(latest, synthetic_referrals(tr_rows, synthetic))
+        extra.update(synthetic_referrals(tr_rows, synthetic))
+    if reroute:
+        extra.update(rerouted_referrals(ref_rows, tr_rows, reroute))
+    if extra:
+        latest = merge_referrals(latest, extra)
     return transfer_legs(t, tr_rows, latest, end_ts)
 
 
 def _legs_for_target(
-    t: Target, end_ts: int, synthetic: tuple[SyntheticProgram, ...] = (),
+    t: Target, end_ts: int,
+    synthetic: tuple[SyntheticProgram, ...] = (),
+    reroute: frozenset[int] = frozenset(),
 ) -> pd.DataFrame:
     ref_rows, tr_rows = fetch_target_rows(t, end_ts)
-    return legs_from_rows(t, ref_rows, tr_rows, end_ts, synthetic)
+    return legs_from_rows(t, ref_rows, tr_rows, end_ts, synthetic, reroute)
 
 
 def _leg(t: Target, user: str, r, amount: float, ref: tuple[int, int] | None) -> dict:
