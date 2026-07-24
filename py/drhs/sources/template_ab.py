@@ -161,12 +161,16 @@ def synthetic_referrals(
 
     # Mint-path canary: delivery-based tagging cannot see a solver minting the
     # token STRAIGHT to the end user (0x0 -> user, no program-contract
-    # transfer). Zero occurrences on ethereum over Sep 2024 - Jun 2026 —
-    # solvers always mint to themselves/intermediaries and the settlement
-    # delivers — but if that ever changes, those acquisitions would silently
-    # stay untagged. Warn so the gap is visible in pipeline logs, not silent.
+    # transfer). History audit (ethereum, Sep 2024 - Jun 2026): every
+    # net-positive mint recipient inside delivery txs was an intermediary
+    # contract retaining dust/inventory residue (25 events, 6 wallets, 0 end
+    # users; max kept 126 sUSDS) — the final holders were still tagged via the
+    # delivery edge. Warn only above a 1-token retention floor so the log
+    # stays signal: an end user keeping a minted position would clear it.
+    _CANARY_DUST_WEI = 10 ** 18  # 1 token; programs are 18-dec sUSDS-scoped
     missed = [(tx, w) for tx, w in mint_rcpts
-              if w not in by_contract and net.get((tx, w), 0) > 0 and (tx, w) not in out]
+              if w not in by_contract and net.get((tx, w), 0) > _CANARY_DUST_WEI
+              and (tx, w) not in out]
     if missed:
         _LOG.warning(
             "synthetic_referrals: %d net-positive mint recipient(s) inside "

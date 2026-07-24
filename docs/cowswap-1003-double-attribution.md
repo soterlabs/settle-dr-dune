@@ -168,13 +168,16 @@ No same-tx conflicts between real Referrals and pseudo-referrals occurred
 
 **Mint-path canary**: delivery-based tagging cannot see a solver minting
 sUSDS *straight* to the end user (0x0 → user with no settlement transfer).
-Observed occurrences on ethereum history: zero — solvers mint to
-themselves/intermediaries and the settlement delivers. `synthetic_referrals`
-now WARNs if a net-positive mint recipient inside a delivery tx goes
-untagged, so the assumption is monitored on every pipeline run rather than
-silent. Residual blind spot: a settlement tx with *no* delivery transfer at
-all (pure direct-mint) is invisible even to the canary; catching those would
-need Trade-event / tx-entrypoint selection.
+History audit (Sep 2024 – Jun 2026): 25 net-positive mint recipients inside
+delivery txs, **all 6 distinct wallets intermediary contracts** (Balancer V3
+vault ×19, 1inch executor, Odos, solvers) retaining dust/inventory residue —
+max kept 126 sUSDS, **zero end users, zero missed attribution** (the final
+holders in those txs were tagged via the delivery edge as designed).
+`synthetic_referrals` WARNs when an untagged mint recipient keeps more than
+1 token, so a behaviour change by solvers surfaces in pipeline logs instead
+of silently under-attributing. Residual blind spot: a settlement tx with
+*no* delivery transfer at all (pure direct-mint) is invisible even to the
+canary; catching those would need Trade-event / tx-entrypoint selection.
 
 Amatsu's "cow" sUSDS payouts over Jul 2025–Apr 2026 total $471.7k vs our
 $546.3k for the same months — same order, different methodology (their sUSDS
