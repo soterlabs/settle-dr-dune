@@ -154,3 +154,44 @@ def test_without_synthetic_unchanged():
     tr_rows = [_tr("0xt1", 1, S, A, 100.0)]
     legs = template_ab.legs_from_rows(SUSDS, [], tr_rows, DAY + 86400)
     assert legs["ref_code"].isna().all()
+
+
+def _mint(tx, li, to, amount):
+    return _tr(tx, li, "0x" + "0" * 40, to, amount)
+
+
+def test_mint_path_canary_warns(caplog):
+    """A net-positive mint recipient inside a delivery tx that we did NOT tag
+    is the mint-path gap — it must show up in logs, never silently."""
+    rows = [_tr("0xt1", 1, S, A, 100.0),    # normal delivery (tagged)
+            _mint("0xt1", 2, E, 30.0)]      # solver mints straight to E
+    with caplog.at_level("WARNING"):
+        tags = synthetic_referrals(rows, (COWSWAP,))
+    assert tags == {("0xt1", A): (1, 1003)}          # E stays untagged (the gap)...
+    assert any("mint-path gap" in m for m in caplog.messages)  # ...but loudly
+
+
+def test_mint_to_forwarder_no_warning(caplog):
+    """The normal solver flow (mint to intermediary, settlement delivers) must
+    not trigger the canary: the mint recipient nets to zero."""
+    rows = [_mint("0xt1", 1, R, 50.0),      # solver R receives the mint
+            _tr("0xt1", 2, R, S, 50.0),     # hands it to the settlement
+            _tr("0xt1", 3, S, A, 50.0)]     # settlement delivers to the user
+    with caplog.at_level("WARNING"):
+        tags = synthetic_referrals(rows, (COWSWAP,))
+    assert tags == {("0xt1", A): (3, 1003)}
+    assert not any("mint-path gap" in m for m in caplog.messages)
+
+
+def test_excluded_contract_tag_produces_no_legs():
+    """A pooled contract (TEMPLATE_A_EXCLUDED) tagged by a delivery must still
+    be dropped from the legs — the exclusion guard wins end-to-end."""
+    morpho = "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb"
+    assert morpho in template_ab.TEMPLATE_A_EXCLUDED
+    tr_rows = [_tr("0xt1", 1, S, morpho, 100.0)]
+    raw = template_ab.legs_from_rows(SUSDS, [], tr_rows, DAY + 86400, (COWSWAP,))
+    # the tag exists at the referral layer...
+    assert synthetic_referrals(tr_rows, (COWSWAP,))[("0xt1", morpho)] == (1, 1003)
+    # ...but the excluded filter (applied in build_legs) removes the user's legs
+    filtered = raw[~raw["user_addr"].str.lower().isin(template_ab.TEMPLATE_A_EXCLUDED)]
+    assert not (filtered["user_addr"] == morpho).any()

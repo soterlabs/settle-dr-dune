@@ -17,12 +17,15 @@ Mirrors queries/twa_stusds.sql:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
 import pandas as pd
 
 from .. import events, hypersync
+
+_LOG = logging.getLogger(__name__)
 
 # Deployed cutoff: events on/after 2026-07-01 are out of the settled window.
 DEFAULT_END = date(2026, 7, 1)
@@ -131,6 +134,7 @@ def synthetic_referrals(
     # always mint to themselves/intermediaries and the settlement then
     # transfers to the user, so the delivery edge is the reliable signal.
     net: dict[tuple[str, str], int] = {}
+    mint_rcpts: list[tuple[str, str]] = []   # (tx, wallet) minted-to inside delivery txs
     for r in tr_rows:
         tx = r.transaction_hash
         if tx not in deliveries:
@@ -140,6 +144,8 @@ def synthetic_referrals(
         to = events.topic_to_addr(r.topic2)
         if to != events.ZERO_ADDR:
             net[(tx, to)] = net.get((tx, to), 0) + amt
+            if frm == events.ZERO_ADDR:
+                mint_rcpts.append((tx, to))
         if frm != events.ZERO_ADDR:
             net[(tx, frm)] = net.get((tx, frm), 0) - amt
 
@@ -152,6 +158,22 @@ def synthetic_referrals(
             prev = out.get(key)
             if prev is None or log_index > prev[0]:
                 out[key] = (log_index, p.ref_code)
+
+    # Mint-path canary: delivery-based tagging cannot see a solver minting the
+    # token STRAIGHT to the end user (0x0 -> user, no program-contract
+    # transfer). Zero occurrences on ethereum over Sep 2024 - Jun 2026 —
+    # solvers always mint to themselves/intermediaries and the settlement
+    # delivers — but if that ever changes, those acquisitions would silently
+    # stay untagged. Warn so the gap is visible in pipeline logs, not silent.
+    missed = [(tx, w) for tx, w in mint_rcpts
+              if w not in by_contract and net.get((tx, w), 0) > 0 and (tx, w) not in out]
+    if missed:
+        _LOG.warning(
+            "synthetic_referrals: %d net-positive mint recipient(s) inside "
+            "delivery txs were NOT tagged (mint-path gap, see "
+            "docs/cowswap-1003-double-attribution.md) — sample: %s",
+            len(missed), [f"{tx}:{w}" for tx, w in missed[:3]],
+        )
     return out
 
 
