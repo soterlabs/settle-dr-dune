@@ -197,6 +197,22 @@ programs terminate each other via last-wins. Adding an aggregator whose users
 receive the token *directly from a fixed contract* (the CowSwap shape) is a
 one-line registry entry.
 
+**Implemented 2026-07-24** for the referral-emitting shape (see
+`adding-an-aggregator.md` §B): `rerouted_referrals` +
+`REROUTED_CODES = {1004, 4011}`. Measured marginal impact on top of 1003
+(susds-eth, settled window, net = $0.00):
+
+| ref_code | delta (USD) |
+|---|---|
+| **1004 Paraswap** | **+37,393** (147 wallets; $1–3.5k/mo since Nov 2024) |
+| **4011 1inch** | **+76** (5 wallets — 1inch→sUSDS is almost entirely executor inventory ops) |
+| 1003 CowSwap | −18,690 — the CowSwap∩Paraswap overlap cohort resolving into correctly split segments |
+| 99 untagged | −16,582 |
+| 1 / 128 / 0 | −2,197 |
+
+(Amatsu pays paraswap $16.2k cumulative; ours is higher because re-routing
+attributes end users from sUSDS launch, not from their tracker's start date.)
+
 On-chain reconnaissance (Ethereum, sUSDS referral events):
 
 | Code | Program | What the events show |
