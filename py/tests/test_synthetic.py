@@ -186,12 +186,30 @@ def test_mint_to_forwarder_no_warning(caplog):
 
 # --- re-routed intermediary codes (Paraswap 1004 / 1inch 4011 shape) ----------
 
+def _warm(owner, code, n=2):
+    """Extra Referral events in unrelated txs so `owner` clears the
+    MIN_INTERMEDIARY_EVENTS threshold (routers emit the code repeatedly)."""
+    return [_ref(f"0xwarm{i}", 1, owner, code) for i in range(n)]
+
+
 def test_reroute_forwarder_code_to_recipient():
     """Referral(1004) lands on router R (net 0); R delivers to A -> A gets 1004."""
     tr = [_tr("0xt1", 2, R, A, 100.0)]              # router forwards to user
-    rf = [_ref("0xt1", 1, R, 1004)]                 # referral owned by the router
+    rf = [_ref("0xt1", 1, R, 1004)] + _warm(R, 1004)
     tags = rerouted_referrals(rf, tr, REROUTED_CODES)
     assert tags == {("0xt1", A): (2, 1004)}
+
+
+def test_single_event_owner_not_treated_as_intermediary():
+    """An END USER can own an allowlisted code (aggregator passed
+    receiver=user). If they forward in the same tx, re-routing must NOT fire
+    onto their transfer recipient — one-off owners are not intermediaries."""
+    tr = [_tr("0xt1", 2, E, D, 100.0)]              # user E forwards to pool D
+    rf = [_ref("0xt1", 1, E, 4011)]                 # E's one and only 4011 event
+    assert rerouted_referrals(rf, tr, REROUTED_CODES) == {}
+    # same shape clears the threshold when the owner is a real router
+    tags = rerouted_referrals(rf + _warm(E, 4011), tr, REROUTED_CODES)
+    assert tags == {("0xt1", D): (2, 4011)}
 
 
 def test_vault_shape_not_rerouted():
@@ -199,7 +217,7 @@ def test_vault_shape_not_rerouted():
     the Yearn-vault shape must never be re-routed."""
     tr = [_tr("0xt1", 2, D, R, 100.0),              # vault R receives and keeps
           _tr("0xt1", 3, R, A, 10.0)]               # small payout to A
-    rf = [_ref("0xt1", 1, R, 1004)]
+    rf = [_ref("0xt1", 1, R, 1004)] + _warm(R, 1004)
     assert rerouted_referrals(rf, tr, REROUTED_CODES) == {}
 
 
@@ -214,7 +232,7 @@ def test_reroute_skips_forwarding_recipient():
     """Recipient that itself forwards on (net 0) is a hop, not the end user."""
     tr = [_tr("0xt1", 2, R, D, 100.0),              # router -> hop D
           _tr("0xt1", 3, D, A, 100.0)]              # hop D -> user A
-    rf = [_ref("0xt1", 1, R, 1004)]
+    rf = [_ref("0xt1", 1, R, 1004)] + _warm(R, 1004)
     tags = rerouted_referrals(rf, tr, REROUTED_CODES)
     assert ("0xt1", D) not in tags                  # net 0 -> not tagged
     assert tags == {}                               # A didn't receive FROM the owner
@@ -224,7 +242,7 @@ def test_reroute_real_user_referral_wins_and_beats_pseudo():
     """Precedence: real user Referral > re-routed code > delivery pseudo-tag."""
     # tx1: user E has their OWN referral -> re-routed 1004 must not override it.
     tr1 = [_tr("0xt1", 2, R, E, 50.0)]
-    rf1 = [_ref("0xt1", 1, R, 1004), _ref("0xt1", 3, E, 777)]
+    rf1 = [_ref("0xt1", 1, R, 1004), _ref("0xt1", 3, E, 777)] + _warm(R, 1004)
     legs = template_ab.legs_from_rows(SUSDS, rf1, tr1, DAY + 86400,
                                       (COWSWAP,), REROUTED_CODES)
     e_ref = legs[legs["user_addr"] == E]["ref_code"].dropna().unique()
@@ -233,7 +251,7 @@ def test_reroute_real_user_referral_wins_and_beats_pseudo():
     # (re-route carries explicit on-chain code evidence).
     tr2 = [_tr("0xt2", 2, S, A, 30.0),              # cowswap delivery -> pseudo 1003
            _tr("0xt2", 3, R, A, 20.0)]              # paraswap router delivery
-    rf2 = [_ref("0xt2", 1, R, 1004)]
+    rf2 = [_ref("0xt2", 1, R, 1004)] + _warm(R, 1004)
     legs2 = template_ab.legs_from_rows(SUSDS, rf2, tr2, DAY + 86400,
                                        (COWSWAP,), REROUTED_CODES)
     a_ref = legs2[legs2["user_addr"] == A]["ref_code"].dropna().unique()
@@ -246,7 +264,7 @@ def test_reroute_end_to_end_terminates_cowswap_tag():
     day2 = DAY + 86400
     tr = [_tr("0xt1", 1, S, A, 100.0, block=100, ts=DAY),        # cowswap
           _tr("0xt5", 2, R, A, 50.0, block=200, ts=day2)]        # paraswap
-    rf = [_ref("0xt5", 1, R, 1004, block=200, ts=day2)]
+    rf = [_ref("0xt5", 1, R, 1004, block=200, ts=day2)] + _warm(R, 1004)
     legs = template_ab.legs_from_rows(SUSDS, rf, tr, day2 + 86400,
                                       (COWSWAP,), REROUTED_CODES)
     out = twa.compute_twa(legs, fill_through=date(2025, 1, 3))

@@ -219,8 +219,20 @@ REROUTED_CODES: frozenset[int] = frozenset({
 })
 
 
+# An address must own an allowlisted code in at least this many events across
+# the scan window to be treated as an intermediary. An END USER can own such a
+# code too (an aggregator passing receiver=user makes the Referral land on the
+# user) — if that user forwards the tokens within the same tx, re-routing
+# would misfire onto their transfer recipient (e.g. a pooled contract).
+# Routers/executors emit the code hundreds of times; users once or twice
+# (observed 4011: three owners with <3 events). Because tagging replays from
+# genesis every run, a new router crosses the threshold retroactively.
+MIN_INTERMEDIARY_EVENTS = 3
+
+
 def rerouted_referrals(
     ref_rows, tr_rows, codes: frozenset[int],
+    min_owner_events: int = MIN_INTERMEDIARY_EVENTS,
 ) -> dict[tuple[str, str], tuple[int, int]]:
     """Re-route intermediary-owned referral codes to the end recipients.
 
@@ -229,6 +241,13 @@ def rerouted_referrals(
     """
     if not codes:
         return {}
+    # 0. how often does each address own an allowlisted code? (intermediary test)
+    owner_events: dict[str, int] = {}
+    for r in ref_rows:
+        if events.referral_code_from_topic(r.topic1) in codes and r.transaction_hash is not None:
+            owner = events.topic_to_addr(r.topic2)
+            owner_events[owner] = owner_events.get(owner, 0) + 1
+
     # 1. allowlisted referral events per tx: owner -> latest code by log_index
     owner_code: dict[str, dict[str, tuple[int, int]]] = {}   # tx -> owner -> (li, code)
     for r in ref_rows:
@@ -236,6 +255,8 @@ def rerouted_referrals(
         if code not in codes or r.transaction_hash is None:
             continue
         owner = events.topic_to_addr(r.topic2)
+        if owner_events.get(owner, 0) < min_owner_events:
+            continue  # likely an end user owning the code, not a router
         per_tx = owner_code.setdefault(r.transaction_hash, {})
         prev = per_tx.get(owner)
         if prev is None or r.log_index > prev[0]:
