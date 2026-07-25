@@ -205,7 +205,7 @@ one-line registry entry.
 | ref_code | delta (USD) |
 |---|---|
 | **1004 Paraswap** | **+37,393** (147 wallets; $1–3.5k/mo since Nov 2024) |
-| **4011 1inch** | **+76** (5 wallets — 1inch→sUSDS is almost entirely executor inventory ops) |
+| **4011 1inch** | **+76** (4 wallets — 1inch→sUSDS is almost entirely executor inventory ops) |
 | 1003 CowSwap | −18,690 — the CowSwap∩Paraswap overlap cohort resolving into correctly split segments |
 | 99 untagged | −16,582 |
 | 1 / 128 / 0 | −2,197 |
