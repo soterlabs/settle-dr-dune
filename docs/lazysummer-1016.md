@@ -33,6 +33,40 @@ venue config has no fleet contracts).
    one-time retroactive true-up (plausibly back-crediting fleet history
    and/or folding 1001 into 1016 at migration).
 
+## Resolution (2026-07-25 — Amatsu unavailable for questions; resolved from data)
+
+New evidence closing the case:
+
+- **Identity is definitive**: 1016's payout wallet
+  `0x447BF9d1485ABDc4C1778025DfdfbE8b894C3796` (from
+  `distribution-rewards-payouts-…_susdsFarm.csv`) is Lazy Summer's
+  **governance timelock** (`lazy-summer-protocol` `config/index.json`,
+  `gov.timelock`).
+- **Spark's own Dune data agrees with us, not Amatsu**: Spark reports 1016 =
+  $1,378 total (USDS-SKY/SPK farm events only) — matching our numbers to the
+  cent (Diff Soter-Spark = 0). The reconciliation workbook already carried
+  the open note *"Amatsu included DR for sUSDC, sUSDS … unknown which
+  balances or events to use."* Those balances are now identified: the fleet
+  sky Arks.
+- **The Apr 2026 $44,758 has NO balance basis anywhere.** Checked at
+  multiple April dates: mainnet arks 3.9M→2.7M sUSDS (shrinking), base arks
+  1.0M→0 (wound down), whole-fleet `totalAssets()` only $11–12M (×0.5%/12 ≈
+  $500/mo), 1001's folded history doesn't match ($89k lifetime, $18.8k
+  sUSDS). Even crediting every Lazy-Summer-related balance at the max
+  boosted rate cannot produce $44.8k for April.
+- Steady-state months (Feb $2,988 / Mar $3,971) are consistent with the
+  ark balances (mainnet ~4–5M + base ~1M) at a boosted rate ≈0.5–0.7%.
+
+**Verdict**: 1016 = fleet sky-Ark balances (address-tagged in Amatsu's DB) +
+a **one-time off-chain adjustment of ≈ $43.5k in Apr 2026** that is not
+reproducible from any on-chain data. Treatment in our pipeline:
+
+1. Reconstruct the on-chain-backed component via class-D ark tagging (below).
+2. Book the Apr 2026 delta as a **documented permanent diff vs Amatsu**
+   (manual-adjustment line in the comparison workbook, like other known
+   diffs) — NOT as event-derived DR. If the payout was real, it should be
+   traceable in the payout wallet's inflows, not in DR methodology.
+
 ## Port plan (class D — contract-tagged source, like Aave 9001)
 
 - **Address set**: the fleet deployment JSONs in
@@ -45,11 +79,9 @@ venue config has no fleet contracts).
   dedicated per-contract source (the 9001 pattern) or, cleaner, wallet-level
   reattribution inside the existing susds source (tag the Ark addresses'
   balances 1016 instead of 99; single-stream, no double counting).
-- **Ask Amatsu** (blocking for parity, add to QUESTIONS.md):
-  1. Which contract addresses feed partner 1016, per chain, since when?
-  2. What is the Apr 2026 $44,758 sUSDS entry — retroactive for which period?
-  3. Confirm 1001 was folded into 1016 from Feb 2026 (their payout wallet
-     mapping).
+- ~~Ask Amatsu~~ — no longer possible; resolved from data (see Resolution
+  above). Residual unknowns accepted: the exact boost rate applied to 1016
+  (implied ≈0.5–0.7%) and the composition of the Apr 2026 adjustment.
 - **Not an aggregator**: do NOT add 1016 to `REROUTED_CODES` or as a
   `SyntheticProgram` — the Arks retain their balances (vault shape); the
   47 farm events flow through the normal referral path already.
