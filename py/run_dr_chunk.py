@@ -37,9 +37,12 @@ DEFAULT_END = date(2026, 7, 1)
 DEFAULT_CHUNKS_DIR = REPO / "hypersync-results" / "dr_full"
 
 # Targets too large for one process even with compact legs: (source,
-# blockchain, symbol) -> shard count. Tuned from the PRD validation run.
+# blockchain, symbol) -> shard count. Tuned from the PRD validation run:
+# N=4 peaked at 3,357MB (over the 2.5GB budget; swap-thrashed, 75min/shard) —
+# the residual hog is compute_twa's per-row output dicts (8.15M rows/shard at
+# N=4). N=8 halves that and measured comfortably inside budget.
 SHARDS: dict[tuple[str, str, str], int] = {
-    ("susds_psm3", "base", "sUSDS"): 4,
+    ("susds_psm3", "base", "sUSDS"): 8,
 }
 
 
