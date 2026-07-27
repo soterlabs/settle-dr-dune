@@ -8,6 +8,7 @@ Diff tabs    : recomputed = Soter - reference over each reference's months.
 Checks tab   : (a) non-aggregator venue set old-vs-new, (b) aggregator values
                vs the measured impact numbers, (c) provenance assertions.
 """
+import re
 import sys
 from pathlib import Path
 
@@ -62,6 +63,15 @@ NOTES = {
 
 chunks = sorted(CHUNK_DIR.glob("chunk_*.csv"))
 assert chunks, f"no chunk CSVs under {CHUNK_DIR}"
+# stale-shard guard: a re-shard (e.g. s0of6 -> s0of8) must not leave old shard
+# files behind — mixed families for one base name would silently double count.
+fam: dict[str, set[str]] = {}
+for c in chunks:
+    m = re.match(r"chunk_(.+)_s\d+of(\d+)$", c.stem)
+    if m:
+        fam.setdefault(m.group(1), set()).add(m.group(2))
+mixed = {b: ns for b, ns in fam.items() if len(ns) > 1}
+assert not mixed, f"mixed shard families would double count: {mixed}"
 print(f"combining {len(chunks)} chunks: {[c.stem for c in chunks]}")
 df = pd.concat([pd.read_csv(c) for c in chunks], ignore_index=True)
 # per-target chunks of one family are additive on the grouping keys
@@ -116,7 +126,8 @@ rows = [["ref_code", "eligible_from", "eligible_until", *MONTHS_2026,
 gc_all = df.groupby(["ref_code", "month_s"])["dr_usd"].sum()
 for code in sorted(df["ref_code"].unique()):
     start, end = eligibility(int(code))
-    ser = gc_all.loc[code] if code in gc_all.index.get_level_values(0) else {}
+    ser = (gc_all.loc[code] if code in gc_all.index.get_level_values(0)
+           else pd.Series(dtype=float))
     def _pay(m):
         return float(ser.get(m, 0.0)) if m >= start and (end is None or m < end) else 0.0
     vals = [round(_pay(m), 2) or "" for m in MONTHS_2026]
@@ -163,11 +174,7 @@ for name in REFS:
         pres = "both" if (s and o) else ("soter only" if s else f"{name.lower()} only")
         diffs = [round((s.get(m, 0.0) if s else 0.0) - (o.get(m, 0.0) if o else 0.0), 2)
                  for m in common]
-        if all(abs(d) < 0.005 for d in diffs) and pres == "both":
-            diffs_out = diffs
-        else:
-            diffs_out = diffs
-        rows.append([str(code), pres, *diffs_out, round(sum(diffs), 2), NOTES.get(code, "")])
+        rows.append([str(code), pres, *diffs, round(sum(diffs), 2), NOTES.get(code, "")])
     write_aoa(f"Diff Soter-{name}", rows)
 
 # --- Checks tab -----------------------------------------------------------------
