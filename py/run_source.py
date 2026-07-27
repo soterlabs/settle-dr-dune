@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 load_dotenv(ROOT / ".env")
 
 from drhs import twa  # noqa: E402
-from drhs.sources import template_ab, template_c, template_d  # noqa: E402
+from drhs.sources import holder, template_ab, template_c, template_d  # noqa: E402
 
 _EXC = template_ab.TEMPLATE_A_EXCLUDED
 
@@ -73,6 +73,10 @@ SPECS: dict[str, SourceSpec] = {
     "usds_farm_sky": SourceSpec(template_d, [template_d.SKY], 7877545),
     "usds_farm_spk": SourceSpec(template_d, [template_d.SPK], 7877545),
     "usds_farm_cle": SourceSpec(template_d, [template_d.CLE], 7877545),
+    # Template F — class-D contract-tagged holders (full contract balance to a
+    # synthetic code; intraday TWA — see drhs/sources/holder.py).
+    "usds_aave": SourceSpec(holder, [holder.AAVE_USDS], 7877569),
+    "usds_ref4001": SourceSpec(holder, [holder.BRIDGE_USDS], 7877570),
     # Template E — Spark sp* vaults (== Template A code path; no exclusions).
     "sp_vaults": SourceSpec(template_ab, template_ab.TEMPLATE_E, 7877546),
     "sp_usdc_eth": SourceSpec(template_ab, [template_ab.SP_USDC_ETH], 7877546),
