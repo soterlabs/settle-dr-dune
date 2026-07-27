@@ -23,6 +23,20 @@ CHUNK_DIR = REPO / "hypersync-results" / "dr_full"
 AGG_CODES = {1003, 1004, 4011}
 MONTHS_2026 = [f"2026-{m:02d}" for m in range(1, 7)]
 
+# --- Payout eligibility windows per ref_code (ops-owned) -----------------------
+# Default: every venue is payable from 2026-01 (MSC settlement start), no end
+# date yet. Override per code as ops advises (e.g. if 9001 Aave is confirmed
+# payable from Spark's official start 2025-07, add it here). Months BEFORE the
+# start still appear in the Soter data tabs (methodology-pure, full history) —
+# eligibility is applied only in the "Payable" view.
+ELIGIBILITY_DEFAULT_START = "2026-01"
+ELIGIBILITY_OVERRIDES: dict[int, tuple[str, str | None]] = {
+    # code: (start "YYYY-MM", end "YYYY-MM" exclusive or None)
+}
+
+def eligibility(code: int) -> tuple[str, str | None]:
+    return ELIGIBILITY_OVERRIDES.get(code, (ELIGIBILITY_DEFAULT_START, None))
+
 NOTES = {
     -999999: "Synthetic code: Untagged USDS-CLE, USDS-SKY, USDS-SPK, stUSDS.",
     0: "Explicit on-chain referral on Ethereum. L2 sUSDS split to 10000/10001.",
@@ -95,6 +109,25 @@ for (code, token), sub in gt.groupby(["ref_code", "token"]):
     tot = round(float(s.sum()), 2)
     rows.append([str(code), token, *vals, tot, NOTES.get(code, "")])
 write_aoa("Soter by Ref Code Token", rows)
+
+# --- Payable by Ref Code (eligibility windows applied) --------------------------
+rows = [["ref_code", "eligible_from", "eligible_until", *MONTHS_2026,
+         "payable_total", "excluded_pre_window", "notes"]]
+gc_all = df.groupby(["ref_code", "month_s"])["dr_usd"].sum()
+for code in sorted(df["ref_code"].unique()):
+    start, end = eligibility(int(code))
+    ser = gc_all.loc[code] if code in gc_all.index.get_level_values(0) else {}
+    def _pay(m):
+        return float(ser.get(m, 0.0)) if m >= start and (end is None or m < end) else 0.0
+    vals = [round(_pay(m), 2) or "" for m in MONTHS_2026]
+    payable = round(sum(float(ser.get(m, 0.0)) for m in ser.index
+                        if m >= start and (end is None or m < end)), 2)
+    excluded = round(sum(float(ser.get(m, 0.0)) for m in ser.index if m < start), 2)
+    if payable == 0 and excluded == 0:
+        continue
+    rows.append([str(code), start, end or "-", *vals, payable, excluded,
+                 NOTES.get(code, "")])
+write_aoa("Payable by Ref Code", rows)
 
 # --- reference tabs copied verbatim --------------------------------------------
 REFS = ["Spark", "Amatsu", "BA", "Payouts"]
