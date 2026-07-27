@@ -37,8 +37,11 @@ NOTES = {
     4011: "1inch — re-routed executor-owned Referral(4011) in the unified stream.",
     1016: "lazysummer — only the on-chain farm Referral(1016) events appear here; "
           "Amatsu additionally tags fleet ark balances DB-side (docs/lazysummer-1016.md).",
-    9001: "Synthetic code: USDS in Aave aEthUSDS; entire contract balance.",
-    4001: "Synthetic code: USDS in Solana OFT Bridge; entire contract balance.",
+    9001: "Synthetic code: USDS in Aave aEthUSDS; entire contract balance. "
+          "Intraday TWA (clean methodology) — the deployed Dune query used "
+          "EOD snapshots, which under-count ~20% on heavy-flow months.",
+    4001: "Synthetic code: USDS in Solana OFT Bridge; entire contract balance. "
+          "Intraday TWA (clean methodology; Dune query used EOD snapshots).",
     10000: "Synthetic code: L2 sUSDS default PSM3 code 0.",
     10001: "Synthetic code: Smart-contract-held L2 sUSDS (code 0 split).",
 }
@@ -191,7 +194,8 @@ for code, exp, slack in agg_expect:
 # (c) non-aggregator values old-vs-new, compared PER MONTH and only where the
 # old workbook has a value — the old Soter tabs apply settlement cutoffs, so
 # full-history totals are not comparable; individual populated months are.
-SHIFTED = {99, 128, 1, 0, 1002, 1001}
+SHIFTED = {99, 128, 1, 0, 1002, 1001}          # aggregator relabeling
+METHOD_CHANGED = {9001, 4001}                     # EOD -> intraday TWA (2026-07-27)
 old_mon = {}
 mon_cols = [c for c in old_hdr if isinstance(c, str) and c[:4].isdigit()]
 mi = {c: old_hdr.index(c) for c in mon_cols}
@@ -216,8 +220,10 @@ for key, old_v in old_mon.items():
         continue
     new_v = float(new_mon.get(key, 0.0))
     if abs(new_v - old_v) > max(25.0, 0.02 * abs(old_v)):
-        big_moves.append((key, round(old_v, 2), round(new_v, 2),
-                          "expected (aggregator shift)" if code in SHIFTED else "UNEXPECTED"))
+        tag = ("expected (aggregator shift)" if code in SHIFTED
+               else "expected (EOD->TWA methodology)" if code in METHOD_CHANGED
+               else "UNEXPECTED")
+        big_moves.append((key, round(old_v, 2), round(new_v, 2), tag))
 unexpected = [x for x in big_moves if x[3] == "UNEXPECTED"]
 checks.append(["non-aggregator per-month values vs old workbook",
                f"{len(old_mon)} populated cells compared; {len(big_moves)} moved >2%/$25; "

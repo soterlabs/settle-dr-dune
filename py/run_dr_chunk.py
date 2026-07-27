@@ -94,37 +94,24 @@ def holder_legs(holder: str, code: int):
 def main() -> int:
     name = sys.argv[1]
     if name in HOLDER_CHUNKS:
-        # Mirrors dr_rewards_monthly_usds_{aave,ref4001}.sql EXACTLY: daily
-        # END-OF-DAY balance snapshots forward-filled over a calendar spine
-        # (NOT intraday TWA — the deployed queries snapshot at day end),
-        # x XR reward_per / 365, conversion 1.0.
-        import pandas as pd
-        from datetime import timedelta, datetime, timezone
-        from drhs.revenue import rates
+        # METHODOLOGY (decided 2026-07-27): intraday TWA, same engine as every
+        # other venue. This deliberately DIVERGES from the deployed Dune
+        # queries (dr_rewards_monthly_usds_{aave,ref4001}.sql), which snapshot
+        # the balance at END OF DAY — on a heavy-intraday-flow contract like
+        # aEthUSDS the EOD method under-counts by ~20% in some months.
+        # Payments are reconciled against this clean methodology; the
+        # comparison workbook's diff tabs carry the EOD-vs-TWA delta.
         family, holder, code = HOLDER_CHUNKS[name]
         out = OUT / f"chunk_{name}.csv"
         if out.exists():
             print(f"[{name}] exists, skipping")
             return 0
         legs = holder_legs(holder, code)
-        print(f"[{name}] {len(legs)} flow events; EOD spine ...", flush=True)
-        legs = legs.sort_values(["block", "log_index"])
-        legs["bal"] = legs["amount_change"].cumsum()
-        legs["dt"] = legs["ts"].map(
-            lambda ts: datetime.fromtimestamp(ts, tz=timezone.utc).date())
-        eod = legs.groupby("dt")["bal"].last()
-        rows, bal = [], 0.0
-        d = date(2024, 9, 1)
-        while d <= FILL:
-            bal = float(eod.get(d, bal))
-            rows.append((f"{d.year}-{d.month:02d}-01",
-                         bal / 365.0 * rates.daily_rate("XR", d)))
-            d += timedelta(days=1)
-        m = (pd.DataFrame(rows, columns=["month", "dr_usd"])
-             .groupby("month")["dr_usd"].sum().reset_index())
-        m["blockchain"], m["token"], m["ref_code"], m["source"] = \
-            "ethereum", "USDS", code, family
-        m = m[["month", "blockchain", "token", "ref_code", "dr_usd", "source"]]
+        print(f"[{name}] {len(legs)} legs; TWA ...", flush=True)
+        tw = twa.compute_twa(legs, fill_through=FILL)
+        m = monthly.monthly_dr(tw, reclassify=monthly.reclass_none,
+                               conv_lookup=monthly.const_conv)
+        m["source"] = family
         m.to_csv(out, index=False)
         print(f"[{name}] wrote {out} ({len(m)} rows)", flush=True)
         return 0
