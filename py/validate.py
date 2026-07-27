@@ -134,7 +134,9 @@ def main() -> int:
     query_id = args.query or SPECS[args.source].dune_query
 
     print(f"[hs] computing {args.source} TWA end={args.end} ...", flush=True)
-    legs = build_source_legs(args.source, args.end)
+    # Dune-parity comparison: the Dune queries carry no synthetic aggregator
+    # programs (e.g. CowSwap 1003), so validate against the pre-synthetic legs.
+    legs = build_source_legs(args.source, args.end, include_synthetic=False)
     # Cap the no-transaction-day fill at the comparison bound: rows with
     # dt < dt_max are identical whether the flat tail extends to dt_max or to
     # 2026-06-30, so this avoids generating a huge (discarded) tail for

@@ -73,7 +73,8 @@ def main():
     fill = min(end_d, date(2026, 6, 30))
 
     print(f"[hs] computing TWA for {cfg['srcs']} ...", flush=True)
-    frames = [build_source_legs(s, end_d) for s in cfg["srcs"]]
+    # Dune-parity comparison: Dune monthly queries carry no synthetic programs.
+    frames = [build_source_legs(s, end_d, include_synthetic=False) for s in cfg["srcs"]]
     legs = pd.concat(frames, ignore_index=True)
     tw = twa.compute_twa(legs, fill_through=fill)
     if cfg.get("sp"):

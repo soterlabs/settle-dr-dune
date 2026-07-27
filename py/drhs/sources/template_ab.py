@@ -17,12 +17,15 @@ Mirrors queries/twa_stusds.sql:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
 import pandas as pd
 
 from .. import events, hypersync
+
+_LOG = logging.getLogger(__name__)
 
 # Deployed cutoff: events on/after 2026-07-01 are out of the settled window.
 DEFAULT_END = date(2026, 7, 1)
@@ -48,6 +51,252 @@ TEMPLATE_A_EXCLUDED: frozenset[str] = frozenset({
     "0xbe3d4ec488a0a042bb86f9176c24f8cd54018ba7",  # Pendle
     "0x00836fe54625be242bcfa286207795405ca4fd10",  # Curve PSM
 })
+
+
+# --- Synthetic aggregator programs (pseudo-referrals) -------------------------
+# Aggregators (CowSwap, Paraswap, ...) never emit a user-level Referral event —
+# their Referral events, when present, land on the router itself (see
+# docs/cowswap-1003-double-attribution.md). Users receive the token as a plain
+# Transfer out of the aggregator's delivery contract. A SyntheticProgram turns
+# those deliveries into pseudo-referral legs *inside the same attribution
+# stream* as real Referral events, so the tag (a) relabels balance instead of
+# double counting it, and (b) is terminated by any later attribution signal
+# (real code or another program's tag) via the TWA engine's last-wins ffill.
+#
+# Tagging rule per delivery tx T: wallet W gets `ref_code` iff W received the
+# token FROM a program contract in T AND W's net token delta across ALL of T's
+# transfers is positive. The net-delta guard drops solvers / routers / the
+# settlement itself, which only forward within the tx (audit: the strict
+# Deposit.owner signal tags 46/46 intermediary contracts and zero end users).
+# A real Referral for the same (tx, wallet) always wins over a pseudo one.
+@dataclass(frozen=True)
+class SyntheticProgram:
+    name: str
+    ref_code: int
+    contracts: frozenset[str]     # delivery contracts, lower-cased
+    # Eligibility window (Atlas requires explicit program start/termination).
+    # Deliveries outside [start, end) are not tagged; None = unbounded.
+    start: date | None = None
+    end: date | None = None
+
+    def active_at(self, ts: int) -> bool:
+        d = datetime.fromtimestamp(ts, tz=timezone.utc).date()
+        return (self.start is None or d >= self.start) and (self.end is None or d < self.end)
+
+
+# CowSwap GPv2Settlement — same address on every chain it is deployed to.
+# Assumption (verified on ethereum): sUSDS only leaves the settlement contract
+# during `settle()`/`swap()` executions, so no separate Trade-event check is
+# needed to recognise a settlement tx.
+COWSWAP = SyntheticProgram(
+    "cowswap", 1003,
+    frozenset({"0x9008d19f58aabd9ed0d60971565aa8510560ab41"}),
+)
+
+
+def synthetic_referrals(
+    tr_rows, programs: tuple[SyntheticProgram, ...],
+) -> dict[tuple[str, str], tuple[int, int]]:
+    """Pseudo-referrals from aggregator deliveries: {(tx, wallet): (log_index, code)}.
+
+    ``tr_rows`` is the full Transfer ``LogRow`` set for one target token.
+    Same shape as ``latest_referral_from_events`` so the two merge trivially.
+    Later deliveries win within a tx (mirrors latest-by-log_index for real
+    Referral events).
+    """
+    if not programs:
+        return {}
+    by_contract: dict[str, SyntheticProgram] = {}
+    for p in programs:
+        for a in p.contracts:
+            by_contract[a] = p
+
+    # pass 1: deliveries (program contract -> wallet) per tx
+    deliveries: dict[str, list[tuple[int, str, SyntheticProgram]]] = {}
+    for r in tr_rows:
+        frm = events.topic_to_addr(r.topic1)
+        p = by_contract.get(frm)
+        if p is None or r.transaction_hash is None or not p.active_at(r.block_time):
+            continue
+        to = events.topic_to_addr(r.topic2)
+        if to == events.ZERO_ADDR or to in by_contract:
+            continue
+        deliveries.setdefault(r.transaction_hash, []).append((r.log_index, to, p))
+
+    if not deliveries:
+        return {}
+
+    # pass 2: net token delta per (tx, wallet) over the delivery txs only.
+    # Kept in exact int wei: token amounts (1e18+) exceed float64's 2**53
+    # integer range, and rounding residues on a perfect forwarder (in == out)
+    # can come out positive — which would falsely tag a solver/router.
+    # NB mints (0x0 -> wallet) are not deliveries: on-chain audit shows solvers
+    # always mint to themselves/intermediaries and the settlement then
+    # transfers to the user, so the delivery edge is the reliable signal.
+    net: dict[tuple[str, str], int] = {}
+    mint_rcpts: list[tuple[str, str]] = []   # (tx, wallet) minted-to inside delivery txs
+    for r in tr_rows:
+        tx = r.transaction_hash
+        if tx not in deliveries:
+            continue
+        amt = events.transfer_value(r.data)
+        frm = events.topic_to_addr(r.topic1)
+        to = events.topic_to_addr(r.topic2)
+        if to != events.ZERO_ADDR:
+            net[(tx, to)] = net.get((tx, to), 0) + amt
+            if frm == events.ZERO_ADDR:
+                mint_rcpts.append((tx, to))
+        if frm != events.ZERO_ADDR:
+            net[(tx, frm)] = net.get((tx, frm), 0) - amt
+
+    out: dict[tuple[str, str], tuple[int, int]] = {}
+    for tx, rows in deliveries.items():
+        for log_index, wallet, p in rows:
+            if net.get((tx, wallet), 0) <= 0:
+                continue  # forwarder (solver/router/hop) — not the final holder
+            key = (tx, wallet)
+            prev = out.get(key)
+            if prev is None or log_index > prev[0]:
+                out[key] = (log_index, p.ref_code)
+
+    # Mint-path canary: delivery-based tagging cannot see a solver minting the
+    # token STRAIGHT to the end user (0x0 -> user, no program-contract
+    # transfer). History audit (ethereum, Sep 2024 - Jun 2026): every
+    # net-positive mint recipient inside delivery txs was an intermediary
+    # contract retaining dust/inventory residue (25 events, 6 wallets, 0 end
+    # users; max kept 126 sUSDS) — the final holders were still tagged via the
+    # delivery edge. Warn only above a 1-token retention floor so the log
+    # stays signal: an end user keeping a minted position would clear it.
+    _CANARY_DUST_WEI = 10 ** 18  # 1 token; programs are 18-dec sUSDS-scoped
+    missed = [(tx, w) for tx, w in mint_rcpts
+              if w not in by_contract and net.get((tx, w), 0) > _CANARY_DUST_WEI
+              and (tx, w) not in out]
+    if missed:
+        _LOG.warning(
+            "synthetic_referrals: %d net-positive mint recipient(s) inside "
+            "delivery txs were NOT tagged (mint-path gap, see "
+            "docs/cowswap-1003-double-attribution.md) — sample: %s",
+            len(missed), [f"{tx}:{w}" for tx, w in missed[:3]],
+        )
+    return out
+
+
+def merge_referrals(
+    real: dict[tuple[str, str], tuple[int, int]],
+    pseudo: dict[tuple[str, str], tuple[int, int]],
+) -> dict[tuple[str, str], tuple[int, int]]:
+    """Real Referral events always beat pseudo-referrals for the same (tx, user)."""
+    merged = dict(pseudo)
+    merged.update(real)
+    return merged
+
+
+# --- Re-routed referral codes (aggregators that DO emit Referral events) ------
+# Some aggregators deposit into the vault themselves and pass their partner
+# code, so a real Referral event fires — but its `owner` is the router/executor
+# that received the minted shares, not the end user (on-chain: all 926
+# Referral(1004) events land on Paraswap routers; all 426 Referral(4011)
+# events on 1inch executors). The router forwards the token to the user in the
+# same tx, so in the plain stream the code sticks to a net-zero intermediary
+# and the user stays untagged.
+#
+# For the allowlisted codes below, the code is RE-ROUTED: when a Referral for
+# such a code lands on owner O in tx T and O is a net-zero/negative forwarder
+# in T, the code is re-attached to the net-positive recipients of transfers
+# FROM O in T. If O is itself net-positive (a partner vault holding for its
+# users — e.g. Yearn's 1007 vaults retain 16.8M sUSDS), nothing is re-routed:
+# the vault keeps its own attribution.
+#
+# This is the corrected version of the removed `referral_per_tx_fallback` CTE
+# (see twa_susds_susdc_erc4626.sql): anchored to the emitting intermediary and
+# its delivery edge, instead of re-tagging by (tx, contract) alone. Being
+# anchored to real events, it needs no router address registry and survives
+# router redeployments. Allowlisted per partner because re-routing shifts DR
+# attribution (a payout-policy decision, not a default).
+REROUTED_CODES: frozenset[int] = frozenset({
+    1004,   # Paraswap (Augustus v5/v6.x, Delta)
+    4011,   # 1inch (AggregationRouter v6 / Fusion executors)
+})
+
+
+# An address must own an allowlisted code in at least this many events across
+# the scan window to be treated as an intermediary. An END USER can own such a
+# code too (an aggregator passing receiver=user makes the Referral land on the
+# user) — if that user forwards the tokens within the same tx, re-routing
+# would misfire onto their transfer recipient (e.g. a pooled contract).
+# Routers/executors emit the code hundreds of times; users once or twice
+# (observed 4011: three owners with <3 events). Because tagging replays from
+# genesis every run, a new router crosses the threshold retroactively.
+MIN_INTERMEDIARY_EVENTS = 3
+
+
+def rerouted_referrals(
+    ref_rows, tr_rows, codes: frozenset[int],
+    min_owner_events: int = MIN_INTERMEDIARY_EVENTS,
+) -> dict[tuple[str, str], tuple[int, int]]:
+    """Re-route intermediary-owned referral codes to the end recipients.
+
+    Returns {(tx, wallet): (log_index, code)} in the shape of
+    ``latest_referral_from_events``. Later deliveries win within a tx.
+    """
+    if not codes:
+        return {}
+    # 0. how often does each address own an allowlisted code? (intermediary test)
+    owner_events: dict[str, int] = {}
+    for r in ref_rows:
+        if events.referral_code_from_topic(r.topic1) in codes and r.transaction_hash is not None:
+            owner = events.topic_to_addr(r.topic2)
+            owner_events[owner] = owner_events.get(owner, 0) + 1
+
+    # 1. allowlisted referral events per tx: owner -> latest code by log_index
+    owner_code: dict[str, dict[str, tuple[int, int]]] = {}   # tx -> owner -> (li, code)
+    for r in ref_rows:
+        code = events.referral_code_from_topic(r.topic1)
+        if code not in codes or r.transaction_hash is None:
+            continue
+        owner = events.topic_to_addr(r.topic2)
+        if owner_events.get(owner, 0) < min_owner_events:
+            continue  # likely an end user owning the code, not a router
+        per_tx = owner_code.setdefault(r.transaction_hash, {})
+        prev = per_tx.get(owner)
+        if prev is None or r.log_index > prev[0]:
+            per_tx[owner] = (r.log_index, code)
+    if not owner_code:
+        return {}
+
+    # 2. net deltas + deliveries out of the referral owners, over those txs
+    net: dict[tuple[str, str], int] = {}
+    deliveries: dict[str, list[tuple[int, str, str]]] = {}   # tx -> [(li, from_owner, to)]
+    for r in tr_rows:
+        tx = r.transaction_hash
+        owners = owner_code.get(tx)
+        if owners is None:
+            continue
+        amt = events.transfer_value(r.data)
+        frm = events.topic_to_addr(r.topic1)
+        to = events.topic_to_addr(r.topic2)
+        if to != events.ZERO_ADDR:
+            net[(tx, to)] = net.get((tx, to), 0) + amt
+        if frm != events.ZERO_ADDR:
+            net[(tx, frm)] = net.get((tx, frm), 0) - amt
+        if frm in owners and to != events.ZERO_ADDR:
+            deliveries.setdefault(tx, []).append((r.log_index, frm, to))
+
+    # 3. re-route forwarder-owned codes to net-positive delivery recipients
+    out: dict[tuple[str, str], tuple[int, int]] = {}
+    for tx, rows in deliveries.items():
+        owners = owner_code[tx]
+        for log_index, owner, wallet in rows:
+            if net.get((tx, owner), 0) > 0:
+                continue  # owner retains (partner vault) — keep its attribution
+            if wallet in owners or net.get((tx, wallet), 0) <= 0:
+                continue  # hop to another intermediary / forwarder
+            code = owners[owner][1]
+            key = (tx, wallet)
+            prev = out.get(key)
+            if prev is None or log_index > prev[0]:
+                out[key] = (log_index, code)
+    return out
 
 
 # --- Target matrix (queries/README.md §Target matrix) ------------------------
@@ -86,6 +335,8 @@ def _end_ts(end_date: date) -> int:
 def build_legs(
     targets: list[Target], *, end_date: date = DEFAULT_END,
     excluded: frozenset[str] = frozenset(),
+    synthetic: tuple[SyntheticProgram, ...] = (),
+    reroute: frozenset[int] = frozenset(),
 ) -> pd.DataFrame:
     """Balance-change legs for ``targets``.
 
@@ -95,8 +346,13 @@ def build_legs(
     ``user_addr not in (select addr from excluded_addresses)`` filter — other
     users' legs (e.g. a transfer *from* an excluded contract *to* a real user)
     are untouched.
+
+    ``synthetic`` programs add pseudo-referral tags for aggregator deliveries
+    (see ``SyntheticProgram``); ``reroute`` re-attaches intermediary-owned
+    referral codes to end recipients (see ``REROUTED_CODES``). Both are
+    applied to every target in the list.
     """
-    frames = [_legs_for_target(t, _end_ts(end_date)) for t in targets]
+    frames = [_legs_for_target(t, _end_ts(end_date), synthetic, reroute) for t in targets]
     frames = [f for f in frames if not f.empty]
     if not frames:
         return pd.DataFrame(columns=[
@@ -185,14 +441,35 @@ def transfer_legs(
     return pd.DataFrame(recs)
 
 
-def legs_from_rows(t: Target, ref_rows, tr_rows, end_ts: int) -> pd.DataFrame:
-    """Pure: raw Referral + Transfer ``LogRow``s -> balance-change legs (A/B)."""
-    return transfer_legs(t, tr_rows, latest_referral_from_events(ref_rows), end_ts)
+def legs_from_rows(
+    t: Target, ref_rows, tr_rows, end_ts: int,
+    synthetic: tuple[SyntheticProgram, ...] = (),
+    reroute: frozenset[int] = frozenset(),
+) -> pd.DataFrame:
+    """Pure: raw Referral + Transfer ``LogRow``s -> balance-change legs (A/B).
+
+    ``synthetic`` programs contribute delivery pseudo-referrals; ``reroute``
+    re-attaches intermediary-owned codes to end recipients. Precedence for the
+    same (tx, user): real Referral > re-routed code > delivery pseudo-tag.
+    """
+    latest = latest_referral_from_events(ref_rows)
+    extra: dict[tuple[str, str], tuple[int, int]] = {}
+    if synthetic:
+        extra.update(synthetic_referrals(tr_rows, synthetic))
+    if reroute:
+        extra.update(rerouted_referrals(ref_rows, tr_rows, reroute))
+    if extra:
+        latest = merge_referrals(latest, extra)
+    return transfer_legs(t, tr_rows, latest, end_ts)
 
 
-def _legs_for_target(t: Target, end_ts: int) -> pd.DataFrame:
+def _legs_for_target(
+    t: Target, end_ts: int,
+    synthetic: tuple[SyntheticProgram, ...] = (),
+    reroute: frozenset[int] = frozenset(),
+) -> pd.DataFrame:
     ref_rows, tr_rows = fetch_target_rows(t, end_ts)
-    return legs_from_rows(t, ref_rows, tr_rows, end_ts)
+    return legs_from_rows(t, ref_rows, tr_rows, end_ts, synthetic, reroute)
 
 
 def _leg(t: Target, user: str, r, amount: float, ref: tuple[int, int] | None) -> dict:
