@@ -128,3 +128,25 @@ constraint after (b). Keep out of the first PR otherwise.
 Fresh full-history run on the box → compare combined output vs the committed
 PR #10 chunk CSVs (must match) → rebuild the comparison workbook → Checks tab
 green → record peak RSS per chunk in the PR description.
+
+## Validation results (2026-07-28, executed)
+
+Fresh full-history run (28 chunk jobs), detached, **zero failures**, fully
+resumable (one mid-run stop/retune/resume exercised the checkpoints).
+
+- **Equivalence: exact.** 1,985 combined rows vs the legacy per-target
+  chunks: identical totals ($45,455,787.90), zero rows beyond 1e-6 relative
+  tolerance.
+- **Workbook Checks: all green** after rebuild (venue set 133=133; 1,265
+  per-month cells, 0 unexpected; aggregator totals to the cent).
+- **Peak RSS**: every chunk ≤ 1,898MB (susds_eth) — inside the 2.5GB budget —
+  EXCEPT the psm3_base shards at **2,765–2,917MB**. Measured cause: the
+  ~2.2GB fetch-time LogRow floor (1.8M swaps + 3.7M transfers held before
+  legs), which sharding cannot reduce. N=4 was tried first and peaked at
+  3,357–3,400MB with swap-thrash (~75min/shard); N=8 is the shipped setting.
+  **This makes deferred item (d) (page-streaming fetch) justified** as the
+  next follow-up; more sharding is not.
+- **Wall clock**: dominated by psm3_base's per-shard refetch (8 fetches of
+  the same rows, ~45min/shard on slow HyperSync). Second follow-up: a worker
+  **multi-shard mode** (one fetch → all N shard CSVs, as the retired lean
+  worker did) would cut base's wall clock ~8x.
