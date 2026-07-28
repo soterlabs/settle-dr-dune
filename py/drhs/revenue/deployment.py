@@ -143,9 +143,12 @@ def deployment_ratios(sp_twa: pd.DataFrame, end: date = END_CAP) -> pd.DataFrame
     totals["dt"] = totals["dt"].astype(str).str[:10]
 
     idle_map: dict[tuple[str, str, str], float] = {}
+    present = set(zip(totals["blockchain"], totals["vault_symbol"]))
     for chain, sym, vault, underlying, dec, start in VAULT_TOKENS:
         if sym in _FORCED_ONE:
             continue  # idle ignored for these; ratio forced to 1
+        if (chain, sym) not in present:
+            continue  # vault absent from this TWA frame (per-target chunk runs)
         series = idle_twa_series(chain, vault, underlying, dec, start, end)
         for d, v in series.items():
             idle_map[(chain, sym, d.isoformat())] = v

@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 load_dotenv(ROOT / ".env")
 
 from drhs import twa  # noqa: E402
-from drhs.sources import template_ab, template_c, template_d  # noqa: E402
+from drhs.sources import holder, template_ab, template_c, template_d  # noqa: E402
 
 _EXC = template_ab.TEMPLATE_A_EXCLUDED
 
@@ -73,6 +73,10 @@ SPECS: dict[str, SourceSpec] = {
     "usds_farm_sky": SourceSpec(template_d, [template_d.SKY], 7877545),
     "usds_farm_spk": SourceSpec(template_d, [template_d.SPK], 7877545),
     "usds_farm_cle": SourceSpec(template_d, [template_d.CLE], 7877545),
+    # Template F — class-D contract-tagged holders (full contract balance to a
+    # synthetic code; intraday TWA — see drhs/sources/holder.py).
+    "usds_aave": SourceSpec(holder, [holder.AAVE_USDS], 7877569),
+    "usds_ref4001": SourceSpec(holder, [holder.BRIDGE_USDS], 7877570),
     # Template E — Spark sp* vaults (== Template A code path; no exclusions).
     "sp_vaults": SourceSpec(template_ab, template_ab.TEMPLATE_E, 7877546),
     "sp_usdc_eth": SourceSpec(template_ab, [template_ab.SP_USDC_ETH], 7877546),
@@ -83,10 +87,13 @@ SPECS: dict[str, SourceSpec] = {
 }
 
 
-def build_source_legs(name: str, end_date: date, *, include_synthetic: bool = True):
+def build_source_legs(name: str, end_date: date, *, include_synthetic: bool = True,
+                      targets: list | None = None):
     """``include_synthetic=False`` builds the pre-synthetic (Dune-parity) legs —
     used by validate.py, since the Dune queries carry no synthetic programs
-    (this switch also disables re-routed codes)."""
+    (this switch also disables re-routed codes). ``targets`` restricts the
+    source to a subset of its targets (the chunked pipeline runs one target
+    per subprocess) — all other SourceSpec wiring stays identical."""
     s = SPECS[name]
     kw = {}
     if include_synthetic:
@@ -94,7 +101,8 @@ def build_source_legs(name: str, end_date: date, *, include_synthetic: bool = Tr
             kw["synthetic"] = s.synthetic
         if s.reroute:
             kw["reroute"] = s.reroute
-    return s.template.build_legs(s.targets, end_date=end_date, excluded=s.excluded, **kw)
+    return s.template.build_legs(targets if targets is not None else s.targets,
+                                 end_date=end_date, excluded=s.excluded, **kw)
 
 
 def _parse_date(s: str) -> date:

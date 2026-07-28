@@ -1,12 +1,30 @@
-"""Worker: compute ONE target-chunk's monthly DR and write a CSV.
+"""Worker: compute ONE target-chunk's monthly DR and write its checkpoint CSV.
 
-Chunked because the monolithic run OOMs this 3.7GB box: monthly DR is exactly
-additive across disjoint user sets, so per-target runs + client-side combine
-produce the identical result (`monthly_dr` is linear in TWA rows; reclass /
-rate / conversion are row-local).
+The monolithic pipeline OOMs the 3.7GB production box, so run_dr_pipeline.py
+runs one of these per target in its own subprocess (see
+docs/prd-chunked-pipeline.md). Chunking is exact: monthly DR is additive
+across disjoint user sets (`monthly_dr` is linear in TWA rows; reclass / rate
+/ conversion are row-local), and `--shard k/N` user-hash sharding is exact by
+the TWA engine's per-user independence.
+
+The chunk registry is DERIVED from pipeline.SOURCE_MONTHLY x run_source.SPECS
+— a new target added to SPECS becomes a chunk automatically
+(py/tests/test_chunk_plan.py asserts the 1:1 mapping).
+
+Usage:
+    .venv/bin/python py/run_dr_chunk.py <chunk> [--shard k/N]
+        [--end 2026-07-01] [--chunks-dir hypersync-results/dr_full]
+    .venv/bin/python py/run_dr_chunk.py --list
 """
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
 import sys
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -15,140 +33,192 @@ from dotenv import load_dotenv
 load_dotenv(REPO / ".env")
 
 from drhs import twa  # noqa: E402
-from drhs.sources import template_ab, template_c, template_d  # noqa: E402
-from drhs.revenue import conversion, deployment, monthly  # noqa: E402
+from drhs.revenue import conversion, deployment, monthly, pipeline  # noqa: E402
+from drhs.sources.template_ab import DEFAULT_END  # noqa: E402
+from run_source import SPECS, build_source_legs  # noqa: E402
 
-_EXC = template_ab.TEMPLATE_A_EXCLUDED
-END = date(2026, 7, 1)
-FILL = date(2026, 6, 30)
-OUT = REPO / "hypersync-results" / "dr_full"
+DEFAULT_CHUNKS_DIR = REPO / "hypersync-results" / "dr_full"
+# Filename shape of sharded checkpoints — the stale-shard guard and the tests
+# must all parse the SAME pattern (import this; never re-declare it).
+SHARD_RE = re.compile(r"chunk_(.+)_s(\d+)of(\d+)$")
 
-def _susds_conv():
-    return monthly.series_conv(conversion.susds_rates(), "rate")
-
-# chunk -> (family, build_legs thunk, reclassify, conv builder, sp?)
-CHUNKS = {
-    "stusds":    ("stusds", lambda: template_ab.build_legs([template_ab.STUSDS], end_date=END),
-                  monthly.reclass_none, lambda: monthly.series_conv(conversion.stusds_rates(), "rate"), False),
-    "farms":     ("farms", lambda: template_d.build_legs(template_d.ALL, end_date=END),
-                  monthly.reclass_none, lambda: monthly.const_conv, False),
-    "susds_eth": ("susds_susdc", lambda: template_ab.build_legs(
-                      [template_ab.SUSDS_ETH], end_date=END, excluded=_EXC,
-                      synthetic=(template_ab.COWSWAP,), reroute=template_ab.REROUTED_CODES),
-                  monthly.reclass_susds_susdc, _susds_conv, False),
-    **{f"susdc_{t.blockchain}": ("susds_susdc",
-        (lambda t=t: template_ab.build_legs([t], end_date=END, excluded=_EXC)),
-        monthly.reclass_susds_susdc, _susds_conv, False)
-       for t in template_ab.TEMPLATE_A_SUSDC},
-    **{f"psm3_{t.blockchain}": ("psm3",
-        (lambda t=t: template_c.build_legs([t], end_date=END, excluded=_EXC)),
-        monthly.reclass_psm3, _susds_conv, False)
-       for t in template_c.ALL},
-    **{f"sp_{t.symbol}_{t.blockchain}": ("sp",
-        (lambda t=t: template_ab.build_legs([t], end_date=END)),
-        monthly.reclass_sp, None, True)
-       for t in template_ab.TEMPLATE_E},
+# Targets too large for one process even with compact legs: (source,
+# blockchain, symbol) -> shard count. Tuned from the PRD validation run:
+# N=4 peaked at 3,357MB (over the 2.5GB budget; swap-thrashed, 75min/shard) —
+# the residual hog is compute_twa's per-row output dicts (8.15M rows/shard at
+# N=4). N=8 halves that and measured comfortably inside budget.
+SHARDS: dict[tuple[str, str, str], int] = {
+    ("susds_psm3", "base", "sUSDS"): 8,
 }
 
-# --- class-D contract-tagged USDS holders (ports of dr_rewards_monthly_usds_*)
-# Full USDS balance of one contract attributed to a synthetic code. Mirrors the
-# Dune queries: scan from 2024-09-01, XR rate, conversion 1.0, token 'USDS'.
-USDS = "0xdc035d45d973e3ec169d2276ddab16f1e407384f"
-HOLDER_CHUNKS = {
-    "usds_aave_9001": ("usds_aave", "0x32a6268f9ba3642dda7892add74f1d34469a4259", 9001),
-    "usds_ref4001":   ("usds_ref4001", "0x1e1d42781fc170ef9da004fb735f56f0276d01b8", 4001),
-}
 
-def holder_legs(holder: str, code: int):
-    import pandas as pd
-    from drhs import events, hypersync
-    from datetime import datetime, timezone
-    start_ts = int(datetime(2024, 9, 1, tzinfo=timezone.utc).timestamp())
-    end_ts = int(datetime(END.year, END.month, END.day, tzinfo=timezone.utc).timestamp())
-    fb = hypersync.find_block_at_or_before("ethereum", start_ts)
-    tb = hypersync.find_block_at_or_before("ethereum", end_ts - 1)
-    ht = events.addr_to_topic(holder)
-    rows = hypersync.query_logs("ethereum", [
-        {"address": [USDS], "topics": [[events.TRANSFER_TOPIC0], [ht]]},        # out
-        {"address": [USDS], "topics": [[events.TRANSFER_TOPIC0], [], [ht]]},    # in
-    ], fb, tb).rows
-    recs = []
-    seen = set()
-    for r in rows:
-        key = (r.block_number, r.log_index)
-        if key in seen or r.block_time >= end_ts:
-            continue  # the two selections can overlap on self-transfers
-        seen.add(key)
-        frm, to = events.topic_to_addr(r.topic1), events.topic_to_addr(r.topic2)
-        amt = events.transfer_value(r.data) / 1e18
-        delta = (amt if to == holder else 0.0) - (amt if frm == holder else 0.0)
-        if delta == 0.0:
+def chunk_plan(families: list[str] | None = None) -> dict[str, tuple]:
+    """chunk name -> (family, source, target, shard_n | None)."""
+    plan: dict[str, tuple] = {}
+    for family, (srcs, _re, _cv, _sp) in pipeline.SOURCE_MONTHLY.items():
+        if families is not None and family not in families:
             continue
-        recs.append({"blockchain": "ethereum", "contract_address": USDS,
-                     "symbol": "USDS", "user_addr": holder, "block": r.block_number,
-                     "log_index": r.log_index, "ts": r.block_time,
-                     "amount_change": delta, "ref_code": code})
-    return pd.DataFrame(recs)
+        for src in srcs:
+            for t in SPECS[src].targets:
+                name = f"{src}_{t.blockchain}_{t.symbol}"
+                if name in plan:
+                    raise ValueError(f"duplicate chunk name {name}")
+                plan[name] = (family, src, t, SHARDS.get((src, t.blockchain, t.symbol)))
+    return plan
 
 
-def main() -> int:
-    name = sys.argv[1]
-    if name in HOLDER_CHUNKS:
-        # METHODOLOGY (decided 2026-07-27): intraday TWA, same engine as every
-        # other venue. This deliberately DIVERGES from the deployed Dune
-        # queries (dr_rewards_monthly_usds_{aave,ref4001}.sql), which snapshot
-        # the balance at END OF DAY — on a heavy-intraday-flow contract like
-        # aEthUSDS the EOD method under-counts by ~20% in some months.
-        # Payments are reconciled against this clean methodology; the
-        # comparison workbook's diff tabs carry the EOD-vs-TWA delta.
-        family, holder, code = HOLDER_CHUNKS[name]
-        out = OUT / f"chunk_{name}.csv"
-        if out.exists():
-            print(f"[{name}] exists, skipping")
-            return 0
-        legs = holder_legs(holder, code)
-        print(f"[{name}] {len(legs)} legs; TWA ...", flush=True)
-        tw = twa.compute_twa(legs, fill_through=FILL)
-        m = monthly.monthly_dr(tw, reclassify=monthly.reclass_none,
-                               conv_lookup=monthly.const_conv)
-        m["source"] = family
-        m.to_csv(out, index=False)
-        print(f"[{name}] wrote {out} ({len(m)} rows)", flush=True)
-        return 0
-    # optional user-shard "k/N": TWA is per-user independent, so sharding legs
-    # by user hash and summing the monthly outputs is exact — needed for
-    # psm3_base (3.09M legs), which OOMs this box in one piece.
-    shard = sys.argv[2] if len(sys.argv) > 2 else None
-    family, build, reclass, conv_builder, is_sp = CHUNKS[name]
-    label = name if shard is None else f"{name}_s{shard.replace('/', 'of')}"
-    out = OUT / f"chunk_{label}.csv"
-    if out.exists():
-        print(f"[{label}] exists, skipping")
-        return 0
-    print(f"[{label}] building legs ...", flush=True)
-    legs = build()
-    if shard is not None:
+def chunk_csv(chunks_dir: Path, name: str, shard: str | None) -> Path:
+    suffix = f"_s{shard.replace('/', 'of')}" if shard else ""
+    return chunks_dir / f"chunk_{name}{suffix}.csv"
+
+
+def parse_shard(shard: str, plan_n: int | None) -> tuple[int, int]:
+    """Validate a k/N shard spec: 0 <= k < N, and N must match the plan."""
+    try:
         k, n = (int(x) for x in shard.split("/"))
-        mask = legs["user_addr"].map(lambda u: int(u[2:10], 16) % n == k)
-        legs = legs[mask].copy()
-    name = label
-    print(f"[{name}] {len(legs)} legs; TWA ...", flush=True)
-    tw = twa.compute_twa(legs, fill_through=FILL)
+    except ValueError:
+        raise SystemExit(f"bad --shard {shard!r} (expected k/N)")
+    if not (n > 0 and 0 <= k < n):
+        raise SystemExit(f"bad --shard {shard!r}: need 0 <= k < N (shards are 0-based)")
+    if plan_n is not None and n != plan_n:
+        raise SystemExit(f"--shard {shard!r} does not match the plan's N={plan_n}")
+    return k, n
+
+
+# --- chunks-dir manifest -------------------------------------------------------
+# Checkpoints are only reusable for the SAME scan window: the manifest pins the
+# --end they were built with, and both worker and orchestrator refuse to mix
+# windows (resume with a different --end would silently reuse stale months).
+def ensure_manifest(chunks_dir: Path, end: date) -> None:
+    mf = chunks_dir / "manifest.json"
+    if mf.exists():
+        have = json.loads(mf.read_text()).get("end")
+        if have != end.isoformat():
+            raise SystemExit(
+                f"{chunks_dir} holds checkpoints for end={have}, requested "
+                f"end={end.isoformat()} — rerun with --fresh or a different --chunks-dir")
+        return
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+    _atomic_write(mf, json.dumps({"end": end.isoformat()}))
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+def load_chunks(chunks_dir: Path, expected: list[Path] | None = None):
+    """Read checkpoint CSVs and sum to (month, blockchain, token, ref_code,
+    source) — the ONE combine used by the pipeline and the workbook builder.
+
+    With ``expected`` (the orchestrator's plan): every expected file must
+    exist and NO other chunk_*.csv may be present — a stray file (legacy
+    naming, an unsharded checkpoint next to its shard set) would silently
+    double count, so it is a hard error. Without ``expected`` (workbook
+    builder on an already-validated dir): all files are read, guarded against
+    mixed shard-N families.
+    """
+    import pandas as pd
+    files = sorted(chunks_dir.glob("chunk_*.csv"))
+    if expected is not None:
+        exp = {p.resolve() for p in expected}
+        strays = [c.name for c in files if c.resolve() not in exp]
+        missing = [p.name for p in expected if not p.exists()]
+        if strays or missing:
+            raise SystemExit(
+                f"chunks dir {chunks_dir} does not match the plan — "
+                f"strays (would double count): {strays or '-'}; missing: {missing or '-'}")
+        files = sorted(exp)
+    fam: dict[str, set[str]] = {}
+    for c in files:
+        m = SHARD_RE.match(c.stem)
+        if m:
+            fam.setdefault(m.group(1), set()).add(m.group(3))
+    mixed = {b: ns for b, ns in fam.items() if len(ns) > 1}
+    if mixed:
+        raise SystemExit(f"mixed shard families would double count: {mixed}")
+    df = pd.concat([pd.read_csv(c) for c in files], ignore_index=True)
+    return (df.groupby(["month", "blockchain", "token", "ref_code", "source"])["dr_usd"]
+            .sum().reset_index())
+
+
+def build_target_legs(src: str, t, end: date):
+    """Legs for ONE target — build_source_legs with a target override, so the
+    SourceSpec wiring (exclusions, synthetic programs, re-routes) has exactly
+    one home."""
+    return build_source_legs(src, end, targets=[t])
+
+
+def compute_chunk(name: str, shard: str | None, end: date):
+    family, src, t, plan_n = chunk_plan()[name]
+    _srcs, reclass, conv_builder, is_sp = pipeline.SOURCE_MONTHLY[family]
+    if shard is not None and is_sp:
+        # deployment_ratios needs the FULL vault TWA (idle series is the whole
+        # chain state); a shard's partial supply yields wrong, often 0, ratios.
+        raise SystemExit(f"sharding sp sources is not exact — refuse {name}")
+    # identical to the monolithic path's min(end, 2026-06-30), expressed off
+    # DEFAULT_END so extending the settlement window is a one-constant change
+    fill = min(end, DEFAULT_END - timedelta(days=1))
+
+    legs = build_target_legs(src, t, end)
+    if shard is not None:
+        k, n = parse_shard(shard, plan_n)
+        legs = legs[legs["user_addr"].map(lambda u: int(u[2:10], 16) % n == k)].copy()
+    print(f"[{name}{'/' + shard if shard else ''}] {len(legs)} legs; TWA ...", flush=True)
+    tw = twa.compute_twa(legs, fill_through=fill)
     del legs
     print(f"[{name}] {len(tw)} TWA rows; monthly ...", flush=True)
+
     if is_sp:
-        dep = deployment.deployment_ratios(tw, end=FILL)
-        dep_map = {(r.blockchain, r.vault_symbol, r.dt): r.deployment_ratio for r in dep.itertuples()}
+        dep = deployment.deployment_ratios(tw, end=fill)
+        dep_map = {(r.blockchain, r.vault_symbol, r.dt): r.deployment_ratio
+                   for r in dep.itertuples()}
         m = monthly.monthly_dr(tw, reclassify=reclass,
                                conv_lookup=monthly.sp_conv(conversion.sp_vault_rates()),
                                sp_deployment=dep_map)
     else:
         m = monthly.monthly_dr(tw, reclassify=reclass, conv_lookup=conv_builder())
     m["source"] = family
-    OUT.mkdir(parents=True, exist_ok=True)
-    m.to_csv(out, index=False)
-    print(f"[{name}] wrote {out} ({len(m)} rows)", flush=True)
+    return m
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("chunk", nargs="?", help="chunk name (see --list)")
+    ap.add_argument("--shard", default=None, help="k/N user-hash shard")
+    ap.add_argument("--end", type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
+                    default=DEFAULT_END)
+    ap.add_argument("--chunks-dir", type=Path, default=DEFAULT_CHUNKS_DIR)
+    ap.add_argument("--list", action="store_true")
+    args = ap.parse_args()
+
+    if args.list or not args.chunk:
+        for name, (family, _s, _t, n) in chunk_plan().items():
+            print(f"{name:40s} family={family}" + (f"  shards={n}" if n else ""))
+        return 0
+
+    if args.end > DEFAULT_END:
+        raise SystemExit(
+            f"--end {args.end} is beyond the deployed scan cutoff {DEFAULT_END}: every "
+            "source caps its window there, so later months would be silently empty. "
+            "Extend the settlement window first (DEFAULT_END in drhs/sources/template_ab.py).")
+    ensure_manifest(args.chunks_dir, args.end)
+    out = chunk_csv(args.chunks_dir, args.chunk, args.shard)
+    if out.exists():
+        print(f"[{args.chunk}] {out.name} exists, skipping")
+        return 0
+    m = compute_chunk(args.chunk, args.shard, args.end)
+    # atomic checkpoint: a kill mid-write must never leave a truncated CSV
+    # that a resume would accept as complete.
+    tmp = out.with_suffix(".csv.tmp")
+    m.to_csv(tmp, index=False)
+    os.replace(tmp, out)
+    import resource
+    peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
+    print(f"[{args.chunk}] wrote {out} ({len(m)} rows; peak RSS {peak_mb}MB)", flush=True)
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

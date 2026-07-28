@@ -45,6 +45,9 @@ SOURCE_MONTHLY = {
     "farms": (["usds_farms"], monthly.reclass_none, lambda: monthly.const_conv, False),
     "psm3": (["susds_psm3"], monthly.reclass_psm3, _susds_conv, False),
     "sp": (["sp_vaults"], monthly.reclass_sp, None, True),
+    # class-D holders: USDS -> XR rate, conversion 1.0 (token is USDS itself)
+    "usds_aave": (["usds_aave"], monthly.reclass_none, lambda: monthly.const_conv, False),
+    "usds_ref4001": (["usds_ref4001"], monthly.reclass_none, lambda: monthly.const_conv, False),
 }
 
 

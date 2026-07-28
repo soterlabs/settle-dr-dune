@@ -422,7 +422,25 @@ def transfer_legs(
     """
     scale = 10 ** t.decimals
     start_day = t.start_date
-    recs: list[dict] = []
+    # Column-wise accumulation: a dict per leg costs ~10x the payload in
+    # object overhead (3.09M legs on psm3_base ≈ 2-3GB of dicts alone — the
+    # OOM driver on the 3.7GB box). Semantics identical to the previous
+    # list-of-dicts build; ref_code keeps ints + pd.NA in an object column.
+    users: list[str] = []
+    blocks: list[int] = []
+    idxs: list[int] = []
+    tss: list[int] = []
+    amts: list[float] = []
+    refs: list = []
+
+    def _add(user: str, r, amount: float, ref) -> None:
+        users.append(user)
+        blocks.append(r.block_number)
+        idxs.append(r.log_index)
+        tss.append(r.block_time)
+        amts.append(amount)
+        refs.append(ref[1] if ref is not None else pd.NA)
+
     for r in tr_rows:
         if r.block_time >= end_ts:
             continue
@@ -433,12 +451,22 @@ def transfer_legs(
         amt = events.transfer_value(r.data) / scale
         tx = r.transaction_hash
         if to != events.ZERO_ADDR:
-            recs.append(_leg(t, to, r, amt, latest_ref.get((tx, to))))
+            _add(to, r, amt, latest_ref.get((tx, to)))
         if frm != events.ZERO_ADDR:
-            recs.append(_leg(t, frm, r, -amt, latest_ref.get((tx, frm))))
-    if not recs:
+            _add(frm, r, -amt, latest_ref.get((tx, frm)))
+    if not users:
         return pd.DataFrame()
-    return pd.DataFrame(recs)
+    return pd.DataFrame({
+        "blockchain": t.blockchain,
+        "contract_address": t.address.lower(),
+        "symbol": t.symbol,
+        "user_addr": users,
+        "block": blocks,
+        "log_index": idxs,
+        "ts": tss,
+        "amount_change": amts,
+        "ref_code": pd.Series(refs, dtype=object),
+    })
 
 
 def legs_from_rows(
