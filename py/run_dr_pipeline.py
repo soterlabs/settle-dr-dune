@@ -18,7 +18,6 @@ and debugging, but OOMs the 3.7GB production box on a full run.
 from __future__ import annotations
 
 import argparse
-import re
 import subprocess
 import sys
 from datetime import date, datetime
@@ -30,10 +29,9 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(Path(__file__).parent))
 load_dotenv(ROOT / ".env")
 
-import pandas as pd  # noqa: E402
-
 from drhs.revenue import pipeline  # noqa: E402
-from run_dr_chunk import chunk_csv, chunk_plan  # noqa: E402
+from drhs.sources.template_ab import DEFAULT_END  # noqa: E402
+from run_dr_chunk import chunk_csv, chunk_plan, ensure_manifest, load_chunks  # noqa: E402
 from run_source import build_source_legs  # noqa: E402
 
 
@@ -41,12 +39,17 @@ def _d(s: str) -> date:
     return datetime.strptime(s, "%Y-%m-%d").date()
 
 
-def _run_chunked(families: list[str], args) -> int:
-    plan = chunk_plan(families)
-    jobs: list[tuple[str, str | None, Path]] = []
-    for name, (_f, _s, _t, n) in plan.items():
+def _jobs(families: list[str] | None, chunks_dir: Path):
+    """(name, shard, checkpoint path) for every planned job."""
+    out = []
+    for name, (_f, _s, _t, n) in chunk_plan(families).items():
         for shard in ([None] if not n else [f"{k}/{n}" for k in range(n)]):
-            jobs.append((name, shard, chunk_csv(args.chunks_dir, name, shard)))
+            out.append((name, shard, chunk_csv(chunks_dir, name, shard)))
+    return out
+
+
+def _run_chunked(families: list[str], args) -> int:
+    jobs = _jobs(families, args.chunks_dir)
 
     if args.list:
         for name, shard, csv in jobs:
@@ -54,13 +57,21 @@ def _run_chunked(families: list[str], args) -> int:
             print(f"{csv.name:55s} {state}")
         return 0
 
+    if args.fresh:
+        # wipe EVERYTHING (incl. out-of-plan strays and the manifest): a fresh
+        # run must not inherit any file this plan does not account for.
+        for f in args.chunks_dir.glob("chunk_*.csv"):
+            f.unlink()
+        mf = args.chunks_dir / "manifest.json"
+        if mf.exists():
+            mf.unlink()
+    ensure_manifest(args.chunks_dir, args.end)
+
     failed: list[str] = []
     for name, shard, csv in jobs:
-        if csv.exists() and not args.fresh:
+        if csv.exists():
             print(f"[dr] {csv.name} exists, skipping", flush=True)
             continue
-        if args.fresh and csv.exists():
-            csv.unlink()
         cmd = [sys.executable, "-u", str(Path(__file__).parent / "run_dr_chunk.py"),
                name, "--end", args.end.isoformat(), "--chunks-dir", str(args.chunks_dir)]
         if shard:
@@ -80,20 +91,17 @@ def _run_chunked(families: list[str], args) -> int:
 
 
 def _combine_chunks(families: list[str], args) -> int:
-    files = sorted(args.chunks_dir.glob("chunk_*.csv"))
-    # stale-shard guard: mixed shard families for one base name double count.
-    fam: dict[str, set[str]] = {}
-    for c in files:
-        m = re.match(r"chunk_(.+)_s\d+of(\d+)$", c.stem)
-        if m:
-            fam.setdefault(m.group(1), set()).add(m.group(2))
-    mixed = {b: ns for b, ns in fam.items() if len(ns) > 1}
-    if mixed:
-        raise SystemExit(f"[dr] mixed shard families would double count: {mixed}")
-
-    df = pd.concat([pd.read_csv(c) for c in files], ignore_index=True)
-    df = (df.groupby(["month", "blockchain", "token", "ref_code", "source"])["dr_usd"]
-          .sum().reset_index())
+    # strict: only files of the FULL plan may exist in the dir (a stray —
+    # legacy naming, an unsharded checkpoint beside its shard set — would
+    # silently double count; load_chunks errors on it). Selected families
+    # must be complete; other families may be partially present and are
+    # read but filtered out below.
+    plan_files = [csv for _, _, csv in _jobs(None, args.chunks_dir)]
+    missing = [csv.name for _, _, csv in _jobs(families, args.chunks_dir)
+               if not csv.exists()]
+    if missing:
+        raise SystemExit(f"[dr] missing planned checkpoints: {missing}")
+    df = load_chunks(args.chunks_dir, expected=[p for p in plan_files if p.exists()])
     per_source = {key: sub.drop(columns=["source"])
                   for key, sub in df.groupby("source") if key in families}
     return _write(per_source, args.out)
@@ -137,6 +145,10 @@ def main() -> int:
     unknown = [k for k in families if k not in pipeline.SOURCE_MONTHLY]
     if unknown:
         ap.error(f"unknown sources: {unknown}")
+    if args.end > DEFAULT_END:
+        ap.error(f"--end {args.end} is beyond the deployed scan cutoff {DEFAULT_END}; "
+                 "extend the settlement window first (DEFAULT_END in "
+                 "drhs/sources/template_ab.py + the fill caps)")
     if args.monolithic:
         return _run_monolithic(families, args)
     return _run_chunked(families, args)

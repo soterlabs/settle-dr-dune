@@ -87,10 +87,13 @@ SPECS: dict[str, SourceSpec] = {
 }
 
 
-def build_source_legs(name: str, end_date: date, *, include_synthetic: bool = True):
+def build_source_legs(name: str, end_date: date, *, include_synthetic: bool = True,
+                      targets: list | None = None):
     """``include_synthetic=False`` builds the pre-synthetic (Dune-parity) legs —
     used by validate.py, since the Dune queries carry no synthetic programs
-    (this switch also disables re-routed codes)."""
+    (this switch also disables re-routed codes). ``targets`` restricts the
+    source to a subset of its targets (the chunked pipeline runs one target
+    per subprocess) — all other SourceSpec wiring stays identical."""
     s = SPECS[name]
     kw = {}
     if include_synthetic:
@@ -98,7 +101,8 @@ def build_source_legs(name: str, end_date: date, *, include_synthetic: bool = Tr
             kw["synthetic"] = s.synthetic
         if s.reroute:
             kw["reroute"] = s.reroute
-    return s.template.build_legs(s.targets, end_date=end_date, excluded=s.excluded, **kw)
+    return s.template.build_legs(targets if targets is not None else s.targets,
+                                 end_date=end_date, excluded=s.excluded, **kw)
 
 
 def _parse_date(s: str) -> date:

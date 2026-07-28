@@ -8,7 +8,6 @@ Diff tabs    : recomputed = Soter - reference over each reference's months.
 Checks tab   : (a) non-aggregator venue set old-vs-new, (b) aggregator values
                vs the measured impact numbers, (c) provenance assertions.
 """
-import re
 import sys
 from pathlib import Path
 
@@ -16,6 +15,7 @@ import openpyxl
 import pandas as pd
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "py"))
 MEASURE = REPO / "hypersync-results" / "measurements"
 OLD = REPO / "dune-results" / "dr_comparison_latest.xlsx"
 NEW = REPO / "hypersync-results" / "dr_comparison_hypersync.xlsx"
@@ -61,22 +61,10 @@ NOTES = {
     10001: "Synthetic code: Smart-contract-held L2 sUSDS (code 0 split).",
 }
 
-chunks = sorted(CHUNK_DIR.glob("chunk_*.csv"))
-assert chunks, f"no chunk CSVs under {CHUNK_DIR}"
-# stale-shard guard: a re-shard (e.g. s0of6 -> s0of8) must not leave old shard
-# files behind — mixed families for one base name would silently double count.
-fam: dict[str, set[str]] = {}
-for c in chunks:
-    m = re.match(r"chunk_(.+)_s\d+of(\d+)$", c.stem)
-    if m:
-        fam.setdefault(m.group(1), set()).add(m.group(2))
-mixed = {b: ns for b, ns in fam.items() if len(ns) > 1}
-assert not mixed, f"mixed shard families would double count: {mixed}"
-print(f"combining {len(chunks)} chunks: {[c.stem for c in chunks]}")
-df = pd.concat([pd.read_csv(c) for c in chunks], ignore_index=True)
-# per-target chunks of one family are additive on the grouping keys
-df = (df.groupby(["month", "blockchain", "token", "ref_code", "source"])["dr_usd"]
-      .sum().reset_index())
+from run_dr_chunk import load_chunks  # noqa: E402  (shared combine + guards)
+assert any(CHUNK_DIR.glob("chunk_*.csv")), f"no chunk CSVs under {CHUNK_DIR}"
+df = load_chunks(CHUNK_DIR)
+print(f"combined chunks from {CHUNK_DIR} -> {len(df)} grouped rows")
 df["month_s"] = df["month"].str[:7]
 df["ref_code"] = df["ref_code"].astype(int)
 
