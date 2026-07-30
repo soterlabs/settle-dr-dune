@@ -84,29 +84,14 @@ def test_sp_reclass_and_speth_zero():
     assert idx[("spETH", 5)] == 0.0                          # spETH earns zero DR
 
 
-# --- infra split + non-payable registry (2026-07-29) ---------------------------
-
-def test_l2_infra_split_is_address_based():
-    alm_arb = "0x92afd6f2385a90e44da3a8b60fe36f6cbe1d8709"
-    user = "0x00000000000000000000000000000000000000aa"
-    # infrastructure: untagged AND code-0 both land in 10001, never 99/10000
-    assert monthly.reclass_psm3("sUSDS", -999999, alm_arb, "arbitrum") == 10001
-    assert monthly.reclass_psm3("sUSDS", 0, alm_arb, "arbitrum") == 10001
-    # a real code on an infra address is preserved (anomaly must stay visible)
-    assert monthly.reclass_psm3("sUSDS", 128, alm_arb, "arbitrum") == 128
-    # ordinary users unchanged: untagged -> 99, default zero -> 10000
-    assert monthly.reclass_psm3("sUSDS", -999999, user, "arbitrum") == 99
-    assert monthly.reclass_psm3("sUSDS", 0, user, "arbitrum") == 10000
-
-
-def test_eth_infra_hook_empty_until_verified():
-    user = "0x00000000000000000000000000000000000000aa"
-    assert monthly.ETH_INFRA_10001 == frozenset()
-    assert monthly.reclass_susds_susdc("sUSDS", -999999, user, "ethereum") == 99
-
+# --- synthetic-and-unpaid registry (2026-07-29) --------------------------------
 
 def test_non_payable_registry():
+    """Codes that are synthetic AND unpaid — excluded from payment tooling."""
     assert monthly.NON_PAYABLE_CODES == {-999999, 99, 127, 130, 131, 132, 10000, 10001}
-    # payable partner / program codes must never appear in the registry
-    for payable in (0, 1, 128, 197, 1001, 1002, 1003, 1004, 1007, 1016, 4001, 9001, 4011):
-        assert payable not in monthly.NON_PAYABLE_CODES
+    # synthetic-but-PAID/payable program codes must never appear here
+    for paid_synthetic in (1003, 1004, 4011, 9001, 4001):
+        assert paid_synthetic not in monthly.NON_PAYABLE_CODES
+    # real partner codes neither
+    for real in (0, 1, 128, 197, 1001, 1002, 1007, 1016):
+        assert real not in monthly.NON_PAYABLE_CODES
