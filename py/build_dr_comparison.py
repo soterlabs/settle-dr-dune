@@ -50,9 +50,12 @@ NOTES = {
     0: "Explicit on-chain referral on Ethereum. L2 sUSDS split to 10000/10001.",
     99: "Synthetic code: Untagged sUSDS.",
     127: "Synthetic code: untagged sUSDC",
-    130: "Synthetic code: Untagged spUSDT.",
-    131: "Synthetic code: Untagged spUSDC.",
-    132: "Synthetic code: Untagged spPYUSD.",
+    130: "Synthetic code: Untagged spUSDT — Spark's own product; Spark "
+         "reports this code directly (payable to Spark).",
+    131: "Synthetic code: Untagged spUSDC — folded into 128 by Spark on "
+         "their side (payable to Spark).",
+    132: "Synthetic code: Untagged spPYUSD — folded into 128 by Spark on "
+         "their side (payable to Spark).",
     197: "stUSDS",
     1003: "CowSwap — synthetic delivery tagging in the unified stream (event-derived).",
     1004: "Paraswap — re-routed router-owned Referral(1004) in the unified stream.",
