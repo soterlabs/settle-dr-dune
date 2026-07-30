@@ -1,5 +1,13 @@
 # Skybase 2026 DR: calculated vs paid
 
+> **Update 2026-07-29:** the payment side (incl. every tx hash) has been
+> verified on-chain and the open items below were resolved or sharpened —
+> see [`skybase-2026-payment-verification.md`](skybase-2026-payment-verification.md).
+> Headlines: netting model verified (Skybase forwarded $0 to partners since
+> Feb, so no partner double-pays); Jan 2026 assumed covered by the CC-buffer
+> payment; June accrues at 0.5% (0.2% starts July); ONE open item — the
+> yearn payment address.
+
 **Date:** 2026-07-28. **Scope:** Skybase prime agent only, calendar 2026
 (settled window Jan–Jun). **Data:** [`skybase_2026_dr_reconciliation.csv`](skybase_2026_dr_reconciliation.csv)
 (regenerate with `py/build_skybase_reconciliation.py`).
