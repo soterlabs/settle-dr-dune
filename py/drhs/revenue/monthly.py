@@ -28,8 +28,18 @@ import pandas as pd
 
 from . import rates
 
-# psm3 code-0 -> 10001 address lists (else 10000), per chain. Lower-cased.
-PSM3_CODE0_10001 = {
+# L2 infrastructure / smart-contract holders -> synthetic 10001, per chain.
+# Lower-cased. ADDRESS-BASED since 2026-07-29: any balance of these contracts
+# that is code-0 tagged OR untagged is filed under 10001 ("smart-contract-held,
+# no beneficiary"). Previously only code-0 balances were rerouted, which left
+# never-tagged infrastructure (ALM proxies, PSM3s — they acquire sUSDS via
+# bridging/counterparty flows, never via tagged swaps) hiding in the generic
+# untagged bucket 99 (audit: docs/skybase-2026-payment-verification.md §5).
+# Real (non-zero) referral codes on these addresses are NOT overridden — one
+# appearing would be an anomaly worth seeing, not silently reburying.
+# NB both 99 and 10001 are NON_PAYABLE_CODES, so this split never changes any
+# payable amount — it only makes "Sky's own float earns no DR" explicit.
+L2_INFRA_10001 = {
     "base": {
         "0x2917956eff0b5eaf030abdb4ef4296df775009ca", "0x3128a0f7f0ea68e7b7c9b00afa7e41045828e858",
         "0x1601843c5e9bc251a3272907010afa41fa18347e", "0x2c776041ccfe903071af44aa147368a9c8eea518",
@@ -49,6 +59,25 @@ PSM3_CODE0_10001 = {
         "0x7b42ed932f26509465f7ce3faf76ffce1275312f",
     },
 }
+# retired name (pre-2026-07-29): the list used to apply to code-0 balances only
+PSM3_CODE0_10001 = L2_INFRA_10001
+
+# Mainnet analogue — infrastructure sUSDS holders to split out of bucket 99.
+# EMPTY until ops verifies the addresses: the top untagged mainnet holders
+# (1.07B sUSDS at 0x1601843c…, plus 0xa10c7ce4…, 0x7f311a4d…, 0x467194771…,
+# 0x1196f688…) are unidentified contracts; guessing here would relabel ~$550k+
+# of monthly notional DR on unverified identities. The reclass hook is live —
+# adding a verified address is a one-line change.
+ETH_INFRA_10001: frozenset[str] = frozenset()
+
+# Ref codes that are tracked for completeness but map to NO beneficiary —
+# sentinels, house/untagged buckets, and infrastructure splits. Payment
+# tooling (the workbook's Payable view, any future payout export) must
+# exclude these; they carry notional dr_usd only.
+#   -999999 sentinel | 99 untagged sUSDS | 127 untagged sUSDC
+#   130/131/132 untagged sp* | 10000 L2 default-zero users (no integrator)
+#   10001 smart-contract-held (value's real DR paid in its own venue)
+NON_PAYABLE_CODES = frozenset({-999999, 99, 127, 130, 131, 132, 10000, 10001})
 
 SP_UNTAGGED = {"spUSDC": 131, "spUSDT": 130, "spPYUSD": 132}
 
@@ -59,16 +88,20 @@ def _month(dt_s: str) -> str:
 
 # ---- reclassification --------------------------------------------------------
 def reclass_susds_susdc(symbol, ref, user, chain):
+    if symbol == "sUSDS" and ref in (-999999, 0) and user.lower() in ETH_INFRA_10001:
+        return 10001  # mainnet infrastructure split (list empty until verified)
     if ref == -999999:
         return 99 if symbol == "sUSDS" else (127 if symbol == "sUSDC" else ref)
     return ref
 
 
 def reclass_psm3(symbol, ref, user, chain):
+    if ref in (-999999, 0) and user.lower() in L2_INFRA_10001.get(chain, set()):
+        return 10001  # address-based: infrastructure never lands in 99/10000
     if ref == -999999:
         return 99
     if ref == 0:
-        return 10001 if user.lower() in PSM3_CODE0_10001.get(chain, set()) else 10000
+        return 10000  # end users who passed the default zero (no integrator)
     return ref
 
 
