@@ -28,6 +28,12 @@ LOCKED = {
     ("XR-stUSDS", date(2026, 1, 1)): 9.995017016051e-04,
     ("XR", date(2024, 6, 1)): 5.982120698627e-03,
     ("XR-stUSDS", date(2025, 12, 31)): 5.982120698627e-03,
+    # 2026-07-09 Boosted-DR termination boundary: XR 0.5% -> 0.2% (the 0.2%
+    # daily rate equals XR*'s, both 0.002 APY). XR* / XR-stUSDS unaffected.
+    ("XR", date(2026, 7, 8)): 4.987575587290e-03,
+    ("XR", date(2026, 7, 9)): 1.998008131217e-03,
+    ("XR*", date(2026, 7, 9)): 1.998008131217e-03,
+    ("XR-stUSDS", date(2026, 7, 9)): 9.995017016051e-04,
 }
 
 

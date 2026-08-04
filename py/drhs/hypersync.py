@@ -19,6 +19,7 @@ import hashlib
 import logging
 import os
 import pickle
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -305,12 +306,32 @@ def find_block_at_or_before(chain: str, target_ts: int) -> int:
     return low
 
 
+# /query is a read-only, idempotent POST — transient upstream failures (LB
+# resets, 5xx, 429) are retried with exponential backoff instead of killing a
+# multi-minute chunk at its last fetch.
+_RETRIES = 5
+_BACKOFF_S = 2.0
+_RETRY_STATUSES = {429, 500, 502, 503, 504}
+
+
 def _execute(chain: str, body: dict[str, Any], headers: dict[str, str], post) -> dict[str, Any]:
-    try:
-        resp = post(endpoint(chain), json=body, headers=headers, timeout=_DEFAULT_TIMEOUT)
-    except requests.RequestException as exc:
-        raise HyperSyncError(f"HyperSync request failed: {exc}") from exc
-    if not resp.ok:
-        raise HyperSyncError(f"HyperSync {chain} -> HTTP {resp.status_code}: {resp.text[:400]}")
-    data: dict[str, Any] = resp.json()
-    return data
+    for attempt in range(_RETRIES + 1):
+        try:
+            resp = post(endpoint(chain), json=body, headers=headers, timeout=_DEFAULT_TIMEOUT)
+        except requests.RequestException as exc:
+            if attempt == _RETRIES:
+                raise HyperSyncError(f"HyperSync request failed: {exc}") from exc
+            logging.getLogger(__name__).warning(
+                "HyperSync %s request error (%s) — retry %d/%d", chain, exc, attempt + 1, _RETRIES)
+            time.sleep(_BACKOFF_S * 2 ** attempt)
+            continue
+        if resp.status_code in _RETRY_STATUSES and attempt < _RETRIES:
+            logging.getLogger(__name__).warning(
+                "HyperSync %s -> HTTP %d — retry %d/%d", chain, resp.status_code, attempt + 1, _RETRIES)
+            time.sleep(_BACKOFF_S * 2 ** attempt)
+            continue
+        if not resp.ok:
+            raise HyperSyncError(f"HyperSync {chain} -> HTTP {resp.status_code}: {resp.text[:400]}")
+        data: dict[str, Any] = resp.json()
+        return data
+    raise HyperSyncError("unreachable")  # pragma: no cover

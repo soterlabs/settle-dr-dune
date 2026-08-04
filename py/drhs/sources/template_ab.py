@@ -12,7 +12,7 @@ Mirrors queries/twa_stusds.sql:
     real counterparty's balance.
   * a leg's ref_code = the referral named for THAT user in the SAME tx (latest
     by log_index), else NA (ffilled in the TWA engine).
-  * scan window: date(ts) >= start_date AND ts < min(end_date, 2026-07-01).
+  * scan window: date(ts) >= start_date AND ts < min(end_date, 2026-08-01).
 """
 
 from __future__ import annotations
@@ -24,11 +24,11 @@ from datetime import date, datetime, timezone
 import pandas as pd
 
 from .. import events, hypersync
+from ..window import DEFAULT_END  # noqa: F401 — canonical home is drhs/window.py;
+# re-exported here because every runner/template historically imports it from
+# this module.
 
 _LOG = logging.getLogger(__name__)
-
-# Deployed cutoff: events on/after 2026-07-01 are out of the settled window.
-DEFAULT_END = date(2026, 7, 1)
 
 
 @dataclass(frozen=True)

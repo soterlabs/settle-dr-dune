@@ -11,12 +11,13 @@ markdown tables embedded in docs/skybase-2026-dr-reconciliation.md.
 from __future__ import annotations
 
 import sys
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
 
 REPO = Path(__file__).resolve().parent.parent
-MONTHS = [f"2026-{m:02d}" for m in range(1, 7)]
+MONTHS = [f"2026-{m:02d}" for m in range(1, 8)]
 
 PARTNER = {0: "Skybase (code 0)", 1: "Skybase (code 1)", 1001: "summerfi",
            1002: "defisaver", 1003: "cow", 1004: "paraswap", 1007: "yearn",
@@ -41,9 +42,25 @@ PAID: dict[int, dict[str, float | None]] = {
 }
 
 
+# The sheet's payment window, DERIVED from the transcribed payments so that
+# adding a new snapshot's payment lines to PAID automatically flows into the
+# summary table. Months in MONTHS outside it carry calculated DR only.
+PAID_MONTHS = sorted({m for d in PAID.values() for m, v in d.items() if v is not None})
+
+
+def _mon(m: str) -> str:
+    return date(int(m[:4]), int(m[5:7]), 1).strftime("%b")
+
+
 def main() -> int:
     df = pd.read_csv(REPO / "hypersync-results" / "dr" / "dr_monthly_combined.csv")
     df["m"] = df["month"].str[:7]
+    have_max = df["m"].max()
+    if have_max < MONTHS[-1]:
+        raise SystemExit(
+            f"dr_monthly_combined.csv reaches only {have_max} but the reconciliation "
+            f"spans through {MONTHS[-1]} — re-run run_dr_pipeline.py for the extended "
+            "window first (a missing month would silently print as $0 calculated)")
     codes = list(PAID) + [10000]
     sub = df[(df["m"].isin(MONTHS)) & df["ref_code"].isin(codes)]
     calc = sub.groupby(["ref_code", "m"])["dr_usd"].sum()
@@ -64,18 +81,24 @@ def main() -> int:
     out.to_csv(csv, index=False)
     print(f"wrote {csv} ({len(out)} rows)\n")
 
-    # markdown table: per code, Feb-Jun cumulative calc vs paid
-    print("| code | partner | calc Jan | calc Feb–Jun | paid Feb–Jun | diff (paid−calc) |")
-    print("|---|---|---|---|---|---|")
+    # markdown table: per code, cumulative calc vs paid over the sheet's
+    # payment window; Jan and the post-window months (calculated, no payment
+    # line yet) as their own columns.
+    span = f"{_mon(PAID_MONTHS[0])}–{_mon(PAID_MONTHS[-1])}"
+    unpaid_months = [m for m in MONTHS if m > PAID_MONTHS[-1]]
+    unpaid_label = "/".join(_mon(m) for m in unpaid_months) or "-"
+    print(f"| code | partner | calc Jan | calc {span} | paid {span} | diff (paid−calc) | calc {unpaid_label} (unpaid) |")
+    print("|---|---|---|---|---|---|---|")
     for code in codes:
         jan = float(calc.get((code, "2026-01"), 0.0))
-        c = sum(float(calc.get((code, m), 0.0)) for m in MONTHS[1:])
-        pvals = [PAID.get(code, {}).get(m) for m in MONTHS[1:]]
+        unpaid = sum(float(calc.get((code, m), 0.0)) for m in unpaid_months)
+        c = sum(float(calc.get((code, m), 0.0)) for m in PAID_MONTHS)
+        pvals = [PAID.get(code, {}).get(m) for m in PAID_MONTHS]
         if all(v is None for v in pvals):
-            print(f"| {code} | {PARTNER[code]} | {jan:,.0f} | {c:,.0f} | (memo) | |")
+            print(f"| {code} | {PARTNER[code]} | {jan:,.0f} | {c:,.0f} | (memo) | | {unpaid:,.0f} |")
             continue
         p = sum(v or 0 for v in pvals)
-        print(f"| {code} | {PARTNER[code]} | {jan:,.0f} | {c:,.0f} | {p:,.0f} | {p - c:+,.0f} |")
+        print(f"| {code} | {PARTNER[code]} | {jan:,.0f} | {c:,.0f} | {p:,.0f} | {p - c:+,.0f} | {unpaid:,.0f} |")
     return 0
 
 

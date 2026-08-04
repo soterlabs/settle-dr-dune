@@ -26,7 +26,11 @@ import pandas as pd
 
 from .. import events, hypersync
 
-END_CAP = date(2026, 6, 30)
+# Idle series must reach the last settled day exactly — a shorter series makes
+# the July deployment ratio degenerate to 1.0 (idle_map misses -> deployed=total).
+from ..window import LAST_SETTLED_DAY
+
+END_CAP = LAST_SETTLED_DAY
 SECONDS_PER_DAY = 86400
 
 # (blockchain, vault_symbol, vault_addr, underlying_addr, underlying_decimals, start_date)

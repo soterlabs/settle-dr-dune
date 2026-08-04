@@ -13,7 +13,7 @@ The chunk registry is DERIVED from pipeline.SOURCE_MONTHLY x run_source.SPECS
 
 Usage:
     .venv/bin/python py/run_dr_chunk.py <chunk> [--shard k/N]
-        [--end 2026-07-01] [--chunks-dir hypersync-results/dr_full]
+        [--end 2026-08-01] [--chunks-dir hypersync-results/dr_full]
     .venv/bin/python py/run_dr_chunk.py --list
 """
 
@@ -157,9 +157,10 @@ def compute_chunk(name: str, shard: str | None, end: date):
         # deployment_ratios needs the FULL vault TWA (idle series is the whole
         # chain state); a shard's partial supply yields wrong, often 0, ratios.
         raise SystemExit(f"sharding sp sources is not exact — refuse {name}")
-    # identical to the monolithic path's min(end, 2026-06-30), expressed off
-    # DEFAULT_END so extending the settlement window is a one-constant change
-    fill = min(end, DEFAULT_END - timedelta(days=1))
+    # end is EXCLUSIVE, the fill day INCLUSIVE: fill through the day before
+    # min(end, DEFAULT_END), so a windowed rerun (--end 2026-07-01) reproduces
+    # the settled June numbers instead of leaking one day of the next month.
+    fill = min(end, DEFAULT_END) - timedelta(days=1)
 
     legs = build_target_legs(src, t, end)
     if shard is not None:
