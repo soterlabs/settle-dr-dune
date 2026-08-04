@@ -89,12 +89,14 @@ Receiver-level scan of every zero-code sUSDS-out PSM3 swap since Sep 2024:
   Base shows 208,850 swaps by 3,902 wallets moving 246M sUSDS for $2,988 of
   all-time DR; all chains together: **$7.2k all-time**.
 
-**Follow-up (recommended, not yet implemented):** an address-based
-infrastructure split (ALM/PSM3 balances out of 99 into an explicit infra
-code on every chain incl. mainnet) + a `NON_PAYABLE_CODES` registry
-{-999999, 99, 127, 130, 131, 132, 10000, 10001} enforced in the Payable view,
-so "Sky's own float earns no DR" is a rule the pipeline asserts rather than a
-convention the payment process remembers.
+**Follow-ups — resolved 2026-07-29:** the `NON_PAYABLE_CODES` registry
+{-999999, 99, 127, 130, 131, 132, 10000, 10001} is implemented
+(`drhs.revenue.monthly`) and enforced in the workbook's Payable view: those
+codes appear only in a labeled "SYNTHETIC & UNPAID" section, never among
+payable amounts. The address-based infra split (moving ALM/PSM3 out of 99
+into 10001) was considered and DESCOPED by ops decision — both buckets are
+non-payable, so the split changes no payment; the composition facts above
+document where the balances sit.
 
 ## 6. Resolved review items (from the v2 sheet discussion)
 

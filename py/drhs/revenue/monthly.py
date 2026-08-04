@@ -52,6 +52,23 @@ PSM3_CODE0_10001 = {
 
 SP_UNTAGGED = {"spUSDC": 131, "spUSDT": 130, "spPYUSD": 132}
 
+# Ref codes that are SYNTHETIC AND UNPAID — tracked for completeness but
+# mapping to NO beneficiary. Payment tooling (the workbook's Payable view,
+# any payout export) must exclude them; their dr_usd is notional only.
+#   -999999 sentinel | 99 untagged sUSDS (house bucket; see caveat below)
+#   127 untagged sUSDC | 10000 L2 default-zero users (no integrator)
+#   10001 smart-contract-held L2 sUSDS (the value's real DR is paid in its
+#   own venue, e.g. sUSDC holders)
+# NOT here: 130/131/132 (untagged sp* holders) — those are untagged inside
+# SPARK'S OWN product, and Spark's reporting claims them (131/132 are folded
+# into Spark's 128 on their side; 130 they report directly), so they are
+# payable-to-Spark, not beneficiary-less. Paid/payable synthetic codes
+# (1003 cow, 1004 paraswap, 4011 1inch, 9001 Aave, 4001 bridge) must NEVER
+# be added here either.
+# Caveat to resolve with ops: 99 mirrors Spark's "house / untagged" bucket —
+# if Spark's payable claim ever includes it, it moves out of this set too.
+NON_PAYABLE_CODES = frozenset({-999999, 99, 127, 10000, 10001})
+
 
 def _month(dt_s: str) -> str:
     return dt_s[:7] + "-01"

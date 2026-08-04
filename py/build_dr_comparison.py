@@ -32,6 +32,11 @@ MONTHS_2026 = [f"2026-{m:02d}" for m in range(1, 8)]
 # payable from Spark's official start 2025-07, add it here). Months BEFORE the
 # start still appear in the Soter data tabs (methodology-pure, full history) —
 # eligibility is applied only in the "Payable" view.
+# Synthetic-and-unpaid codes — never in the payable section, regardless of
+# eligibility. Canonical registry: drhs.revenue.monthly.NON_PAYABLE_CODES.
+sys.path.insert(0, str(REPO / "py"))
+from drhs.revenue.monthly import NON_PAYABLE_CODES  # noqa: E402
+
 ELIGIBILITY_DEFAULT_START = "2026-01"
 ELIGIBILITY_OVERRIDES: dict[int, tuple[str, str | None]] = {
     # code: (start "YYYY-MM", end "YYYY-MM" exclusive or None)
@@ -45,9 +50,12 @@ NOTES = {
     0: "Explicit on-chain referral on Ethereum. L2 sUSDS split to 10000/10001.",
     99: "Synthetic code: Untagged sUSDS.",
     127: "Synthetic code: untagged sUSDC",
-    130: "Synthetic code: Untagged spUSDT.",
-    131: "Synthetic code: Untagged spUSDC.",
-    132: "Synthetic code: Untagged spPYUSD.",
+    130: "Synthetic code: Untagged spUSDT — Spark's own product; Spark "
+         "reports this code directly (payable to Spark).",
+    131: "Synthetic code: Untagged spUSDC — folded into 128 by Spark on "
+         "their side (payable to Spark).",
+    132: "Synthetic code: Untagged spPYUSD — folded into 128 by Spark on "
+         "their side (payable to Spark).",
     197: "stUSDS",
     1003: "CowSwap — synthetic delivery tagging in the unified stream (event-derived).",
     1004: "Paraswap — re-routed router-owned Referral(1004) in the unified stream.",
@@ -132,11 +140,17 @@ write_aoa("Soter by Ref Code Token", rows)
 # --- Payable by Ref Code (eligibility windows applied) --------------------------
 rows = [["ref_code", "eligible_from", "eligible_until", *MONTHS_2026,
          "payable_total", "excluded_pre_window", "notes"]]
+nonpay_rows = []
 gc_all = df.groupby(["ref_code", "month_s"])["dr_usd"].sum()
 for code in sorted(df["ref_code"].unique()):
-    start, end = eligibility(int(code))
     ser = (gc_all.loc[code] if code in gc_all.index.get_level_values(0)
            else pd.Series(dtype=float))
+    if int(code) in NON_PAYABLE_CODES:
+        vals = [round(float(ser.get(m, 0.0)), 2) or "" for m in MONTHS_2026]
+        nonpay_rows.append([str(code), "-", "-", *vals, "",
+                            round(float(ser.sum()), 2), NOTES.get(code, "")])
+        continue
+    start, end = eligibility(int(code))
     def _pay(m):
         return float(ser.get(m, 0.0)) if m >= start and (end is None or m < end) else 0.0
     vals = [round(_pay(m), 2) or "" for m in MONTHS_2026]
@@ -147,6 +161,11 @@ for code in sorted(df["ref_code"].unique()):
         continue
     rows.append([str(code), start, end or "-", *vals, payable, excluded,
                  NOTES.get(code, "")])
+rows.append([])
+rows.append(["SYNTHETIC & UNPAID (tracked, no beneficiary — notional dr_usd; "
+             "never pay, never in the payment spreadsheet)",
+             "", "", *[""] * len(MONTHS_2026), "", "all-time total", ""])
+rows.extend(nonpay_rows)
 write_aoa("Payable by Ref Code", rows)
 
 # --- reference tabs copied verbatim --------------------------------------------

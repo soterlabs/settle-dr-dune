@@ -82,3 +82,20 @@ def test_sp_reclass_and_speth_zero():
     idx = {(r.token, r.ref_code): r.dr_usd for r in out.itertuples()}
     assert (idx.get(("spUSDT", 130), None)) is not None      # spUSDT untagged -> 130
     assert idx[("spETH", 5)] == 0.0                          # spETH earns zero DR
+
+
+# --- synthetic-and-unpaid registry (2026-07-29) --------------------------------
+
+def test_non_payable_registry():
+    """Codes that are synthetic AND unpaid — excluded from payment tooling."""
+    assert monthly.NON_PAYABLE_CODES == {-999999, 99, 127, 10000, 10001}
+    # synthetic-but-PAID/payable program codes must never appear here
+    for paid_synthetic in (1003, 1004, 4011, 9001, 4001):
+        assert paid_synthetic not in monthly.NON_PAYABLE_CODES
+    # untagged-inside-Spark's-product codes are Spark's (131/132 folded into
+    # their 128; 130 reported by Spark directly) — payable, so not here
+    for spark_untagged in (130, 131, 132):
+        assert spark_untagged not in monthly.NON_PAYABLE_CODES
+    # real partner codes neither
+    for real in (0, 1, 128, 197, 1001, 1002, 1007, 1016):
+        assert real not in monthly.NON_PAYABLE_CODES
