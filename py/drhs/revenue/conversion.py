@@ -24,8 +24,11 @@ from datetime import date, datetime, timedelta, timezone
 import pandas as pd
 
 from .. import events, hypersync
+from ..window import LAST_SETTLED_DAY
 
-END_CAP = date(2026, 6, 30)
+# Conversion series must reach the last settled day exactly — a shorter series
+# makes monthly.series_conv/sp_conv fall back to 1.0 for the missing tail.
+END_CAP = LAST_SETTLED_DAY
 
 
 def _daily_last_rate_series(chain: str, vault: str, start: date, end: date) -> pd.DataFrame:

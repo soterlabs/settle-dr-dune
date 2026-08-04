@@ -21,7 +21,7 @@ import argparse
 import os
 import sys
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -34,6 +34,7 @@ load_dotenv(ROOT / ".env")
 
 from drhs import twa  # noqa: E402
 from drhs.sources import template_ab  # noqa: E402
+from drhs.window import LAST_SETTLED_DAY  # noqa: E402
 from run_source import SPECS, build_source_legs  # noqa: E402
 
 DUNE_BASE = "https://api.dune.com/api/v1"
@@ -137,11 +138,11 @@ def main() -> int:
     # Dune-parity comparison: the Dune queries carry no synthetic aggregator
     # programs (e.g. CowSwap 1003), so validate against the pre-synthetic legs.
     legs = build_source_legs(args.source, args.end, include_synthetic=False)
-    # Cap the no-transaction-day fill at the comparison bound: rows with
-    # dt < dt_max are identical whether the flat tail extends to dt_max or to
-    # 2026-06-30, so this avoids generating a huge (discarded) tail for
-    # high-volume tokens without changing the compared rows.
-    fill_through = min(dt_max, date(2026, 6, 30))
+    # Cap the no-transaction-day fill at the comparison bound: the comparison
+    # keeps rows with dt < dt_max, so the fill must reach dt_max - 1 exactly —
+    # shorter drops legitimate fill rows from the HyperSync side of the diff,
+    # longer generates a huge discarded tail for high-volume tokens.
+    fill_through = min(dt_max - timedelta(days=1), LAST_SETTLED_DAY)
     hs = twa.compute_twa(legs, fill_through=fill_through)
     if hs.empty:
         print("[hs] EMPTY — nothing to validate (source has no data in window).")

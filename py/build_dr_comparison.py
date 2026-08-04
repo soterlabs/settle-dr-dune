@@ -8,7 +8,9 @@ Diff tabs    : recomputed = Soter - reference over each reference's months.
 Checks tab   : (a) non-aggregator venue set old-vs-new, (b) aggregator values
                vs the measured impact numbers, (c) provenance assertions.
 """
+import json
 import sys
+from datetime import date
 from pathlib import Path
 
 import openpyxl
@@ -22,7 +24,7 @@ NEW = REPO / "hypersync-results" / "dr_comparison_hypersync.xlsx"
 CHUNK_DIR = REPO / "hypersync-results" / "dr_full"
 
 AGG_CODES = {1003, 1004, 4011}
-MONTHS_2026 = [f"2026-{m:02d}" for m in range(1, 7)]
+MONTHS_2026 = [f"2026-{m:02d}" for m in range(1, 8)]
 
 # --- Payout eligibility windows per ref_code (ops-owned) -----------------------
 # Default: every venue is payable from 2026-01 (MSC settlement start), no end
@@ -61,9 +63,28 @@ NOTES = {
     10001: "Synthetic code: Smart-contract-held L2 sUSDS (code 0 split).",
 }
 
-from run_dr_chunk import load_chunks  # noqa: E402  (shared combine + guards)
-assert any(CHUNK_DIR.glob("chunk_*.csv")), f"no chunk CSVs under {CHUNK_DIR}"
-df = load_chunks(CHUNK_DIR)
+from run_dr_chunk import chunk_csv, chunk_plan, load_chunks  # noqa: E402
+
+# The workbook must be built from a COMPLETE chunk set for the window it
+# claims: the dir's manifest pins the --end its checkpoints were built with,
+# and the derived plan pins the exact file set. A stale dir (older end) or a
+# partial regeneration would otherwise render blank/short July columns while
+# every check still reads green.
+_mf = CHUNK_DIR / "manifest.json"
+if not _mf.exists():
+    raise SystemExit(f"{CHUNK_DIR} has no manifest.json — run run_dr_pipeline.py first")
+_mf_end = json.loads(_mf.read_text())["end"]
+_y, _m = int(MONTHS_2026[-1][:4]), int(MONTHS_2026[-1][5:7])
+_need_end = date(_y + (_m == 12), _m % 12 + 1, 1).isoformat()
+if _mf_end < _need_end:
+    raise SystemExit(
+        f"{CHUNK_DIR} holds checkpoints for end={_mf_end} but the workbook spans "
+        f"through {MONTHS_2026[-1]} (needs end >= {_need_end}) — re-run "
+        "run_dr_pipeline.py for the extended window first")
+_expected = [chunk_csv(CHUNK_DIR, name, shard)
+             for name, (_f, _s, _t, _n) in chunk_plan().items()
+             for shard in ([None] if not _n else [f"{k}/{_n}" for k in range(_n)])]
+df = load_chunks(CHUNK_DIR, expected=_expected)
 print(f"combined chunks from {CHUNK_DIR} -> {len(df)} grouped rows")
 df["month_s"] = df["month"].str[:7]
 df["ref_code"] = df["ref_code"].astype(int)
@@ -207,7 +228,13 @@ exp_1003 = 0.0 if imp is None else (
     imp[imp.ref_code == 1003]["delta"].sum() + rer[rer.ref_code == 1003]["delta"].sum())
 exp_1004 = 0.0 if rer is None else rer[rer.ref_code == 1004]["delta"].sum()
 exp_4011 = 0.0 if rer is None else rer[rer.ref_code == 4011]["delta"].sum()
-new_tot_by_code = df.groupby("ref_code")["dr_usd"].sum()
+# The measurement CSVs were captured at the 2026-07-01 cutoff — compare only
+# over the months they cover, so extending the settlement window doesn't
+# spuriously fail the check on new months' aggregator DR.
+meas_max = None if imp is None else max(
+    pd.concat([imp["month"], rer["month"]]).str[:7])
+new_tot_by_code = (df if meas_max is None else
+                   df[df["month_s"] <= meas_max]).groupby("ref_code")["dr_usd"].sum()
 # 1004 additionally carries the routers' own dust balances self-tagged by
 # their real Referral events (~$65 full-history; old workbook showed $0.06 in
 # the 2026 window alone) — allow that residue on top of the re-route delta.
@@ -216,8 +243,24 @@ agg_expect = () if imp is None else (
 for code, exp, slack in agg_expect:
     got = float(new_tot_by_code.get(code, 0.0))
     ok = exp - 1.0 <= got <= exp + slack
-    checks.append([f"aggregator {code} total vs measured", "OK" if ok else "MISMATCH",
+    checks.append([f"aggregator {code} total vs measured (thru {meas_max})",
+                   "OK" if ok else "MISMATCH",
                    f"workbook={got:,.2f} expected={exp:,.2f} (+{slack:.0f} router-dust slack for 1004)"])
+
+# months past the measurement cutoff have NO independent aggregator
+# verification — surface them loudly instead of silently excluding them.
+if meas_max is not None:
+    uncov = sorted(m for m in set(df["month_s"]) if m > meas_max)
+    if uncov:
+        vals = (df[df["month_s"].isin(uncov) & df["ref_code"].isin(AGG_CODES)]
+                .groupby("ref_code")["dr_usd"].sum())
+        checks.append(["aggregator months beyond measurement coverage", "UNVERIFIED",
+                       f"months {uncov}: "
+                       + ", ".join(f"{c}=${float(vals.get(c, 0.0)):,.2f}"
+                                   for c in sorted(AGG_CODES))
+                       + f" — the impact/reroute measurement run stops at {meas_max}; "
+                       "re-run the measurement harness (or verify attribution "
+                       "manually) before settling aggregator codes for these months"])
 
 # (c) non-aggregator values old-vs-new, compared PER MONTH and only where the
 # old workbook has a value — the old Soter tabs apply settlement cutoffs, so
@@ -259,7 +302,22 @@ checks.append(["non-aggregator per-month values vs old workbook",
                "; ".join(f"{k}:{o}->{n} {tag}" for k, o, n, tag in
                          sorted(unexpected, key=lambda x: -abs(x[2] - x[1]))[:12])])
 
-# (d) provenance
+# (d) July 2026 rate basis — Boosted-DR termination applied from 2026-07-09.
+# Asserted against the ACTUAL rate table the pipeline computed with, not prose.
+from drhs.revenue import rates  # noqa: E402
+_rate_ok = (
+    rates.daily_rate("XR", date(2026, 7, 8)) == rates.apy_to_daily(0.005)
+    and rates.daily_rate("XR", date(2026, 7, 9)) == rates.apy_to_daily(0.002)
+    and rates.daily_rate("XR*", date(2026, 7, 9)) == rates.apy_to_daily(0.002)
+    and rates.daily_rate("XR-stUSDS", date(2026, 7, 9)) == rates.apy_to_daily(0.001))
+checks.append(["2026-07 rate basis", "OK" if _rate_ok else "MISMATCH",
+               "XR 0.5% through 2026-07-08, 0.2% from 2026-07-09 (Atlas Edit Weekly "
+               "Cycle week of 2026-07-06 terminates the +0.3% Boosted DR on the 0.2% "
+               "base, ratified 07-09; matches the MSC sheet note 'BOOSTED DR Changed "
+               "July 9th'). XR* 0.2% and XR-stUSDS 0.1% unaffected. Asserted against "
+               "py/drhs/revenue/rates.py REWARD_SCHEDULE."])
+
+# (e) provenance
 checks.append(["provenance", "OK",
                "Soter tabs derive solely from hypersync-results/dr_full (HyperSync event "
                "logs; rates = locked protocol constants, tests py/tests/test_revenue.py; "

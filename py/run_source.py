@@ -1,7 +1,7 @@
 """Run one DR TWA source over HyperSync and write the shared-schema CSV.
 
 Usage:
-    .venv/bin/python py/run_source.py stusds [--end 2026-07-01] [--out PATH]
+    .venv/bin/python py/run_source.py stusds [--end 2026-08-01] [--out PATH]
 
 Env: ENVIO_API_TOKEN (HyperSync auth). Loaded from repo-root .env.
 
@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -113,14 +113,17 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("source", choices=sorted(SPECS))
     ap.add_argument("--end", type=_parse_date, default=template_ab.DEFAULT_END,
-                    help="scan cutoff (exclusive); default 2026-07-01")
+                    help=f"scan cutoff (exclusive); default {template_ab.DEFAULT_END} (the settled window)")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
 
     print(f"[{args.source}] fetching events via HyperSync ...", flush=True)
     legs = build_source_legs(args.source, args.end)
     print(f"[{args.source}] {len(legs)} balance-change legs; computing TWA ...", flush=True)
-    df = twa.compute_twa(legs)
+    # end is exclusive, the fill day inclusive — same expression as the chunk
+    # worker, so a windowed run's fill tail stops with its scan window.
+    df = twa.compute_twa(
+        legs, fill_through=min(args.end, template_ab.DEFAULT_END) - timedelta(days=1))
     print(f"[{args.source}] {len(df)} TWA rows "
           f"({df['user_addr'].nunique() if len(df) else 0} users)", flush=True)
 

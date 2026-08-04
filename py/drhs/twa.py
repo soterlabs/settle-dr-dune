@@ -25,7 +25,8 @@ fixtures.
 
 Knob:
   * ``fill_through`` — the calendar day the no-transaction-day fill extends to
-    for users still holding a balance (SQL ``least(current_date, 2026-06-30)``).
+    for users still holding a balance (the SQL's ``least(current_date, <last
+    settled day>)``; defaults to drhs.window.LAST_SETTLED_DAY).
 """
 
 from __future__ import annotations
@@ -34,6 +35,8 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
+
+from .window import LAST_SETTLED_DAY
 
 SENTINEL = -999999
 SECONDS_PER_DAY = 86400
@@ -56,7 +59,7 @@ def _midnight_ts(d: date) -> int:
     return int(datetime(d.year, d.month, d.day, tzinfo=timezone.utc).timestamp())
 
 
-def compute_twa(legs: pd.DataFrame, *, fill_through: date = date(2026, 6, 30)) -> pd.DataFrame:
+def compute_twa(legs: pd.DataFrame, *, fill_through: date = LAST_SETTLED_DAY) -> pd.DataFrame:
     """Compute the per-user daily TWA frame from balance-change legs.
 
     ``legs`` columns: blockchain, contract_address, symbol, user_addr, block,

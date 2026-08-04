@@ -19,10 +19,21 @@ from datetime import date
 
 import pandas as pd
 
-# (reward_code, reward_description, apy, start_dt, end_dt) — verbatim from rates_dr.sql
+# (reward_code, reward_description, apy, start_dt, end_dt) — from rates_dr.sql,
+# extended past the retired Dune copy (7877547, frozen at the June 2026
+# settlement) with the 2026-07-09 Boosted-DR termination.
+#
+# 2026-07-09 rate cut: the Atlas Edit Weekly Cycle (week of 2026-07-06,
+# forum.skyeco.com/t/.../28028) TERMINATES the +0.3% Boosted Distribution
+# Reward Rate on top of the 0.2% base — the XR family drops 0.5% -> 0.2%,
+# ratified 2026-07-09 (matches the MSC sheet note "BOOSTED DR Changed July
+# 9th"; June confirmed at 0.5%, docs/skybase-2026-payment-verification.md).
+# XR* was already at the 0.2% base (never boosted) and XR-stUSDS (0.1%) is a
+# separate tier — both unaffected.
 REWARD_SCHEDULE = [
     ("XR", "Accessibility Rewards (sUSDS/USDS-SKY/USDS-SPK)", 0.006, date(2024, 1, 1), date(2025, 12, 31)),
-    ("XR", "Accessibility Rewards (sUSDS/USDS-SKY/USDS-SPK)", 0.005, date(2026, 1, 1), date(2030, 12, 31)),
+    ("XR", "Accessibility Rewards (sUSDS/USDS-SKY/USDS-SPK)", 0.005, date(2026, 1, 1), date(2026, 7, 8)),
+    ("XR", "Accessibility Rewards (sUSDS/USDS-SKY/USDS-SPK)", 0.002, date(2026, 7, 9), date(2030, 12, 31)),
     ("XR-stUSDS", "Accessibility Rewards (stUSDS)", 0.006, date(2024, 1, 1), date(2025, 12, 31)),
     ("XR-stUSDS", "Accessibility Rewards (stUSDS)", 0.001, date(2026, 1, 1), date(2030, 12, 31)),
     ("XR*", "Accessibility Rewards Alternative (spUSDC/spUSDT/spPYUSD/spETH)", 0.006, date(2024, 1, 1), date(2025, 12, 31)),

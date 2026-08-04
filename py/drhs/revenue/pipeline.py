@@ -22,11 +22,12 @@ production run over these sources is slow (fine for a windowed run).
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 
 from .. import twa
+from ..window import DEFAULT_END
 from . import conversion, deployment, monthly
 
 
@@ -55,7 +56,9 @@ def source_monthly(key: str, end: date, build_legs) -> pd.DataFrame:
     """Compute one source's monthly DR. ``build_legs(src, end)`` fetches TWA legs
     (injected to avoid importing run_source here)."""
     srcs, reclass, conv_builder, is_sp = SOURCE_MONTHLY[key]
-    fill = min(end, date(2026, 6, 30))
+    # end is EXCLUSIVE, the fill day INCLUSIVE: fill through the day before
+    # min(end, DEFAULT_END) — same expression as the chunked worker's.
+    fill = min(end, DEFAULT_END) - timedelta(days=1)
     legs = pd.concat([build_legs(s, end) for s in srcs], ignore_index=True)
     tw = twa.compute_twa(legs, fill_through=fill)
     if is_sp:

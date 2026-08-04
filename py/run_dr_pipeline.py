@@ -1,6 +1,6 @@
 """Run the full DR pipeline off HyperSync (no Dune) and write the rollups.
 
-    .venv/bin/python py/run_dr_pipeline.py [--sources stusds,farms] [--end 2026-07-01]
+    .venv/bin/python py/run_dr_pipeline.py [--sources stusds,farms] [--end 2026-08-01]
 
 Writes to hypersync-results/dr/:
     dr_monthly_combined.csv
@@ -130,7 +130,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sources", default=",".join(pipeline.SOURCE_MONTHLY),
                     help="comma-separated subset of: " + ",".join(pipeline.SOURCE_MONTHLY))
-    ap.add_argument("--end", type=_d, default=date(2026, 7, 1))
+    ap.add_argument("--end", type=_d, default=date(2026, 8, 1))
     ap.add_argument("--out", type=Path, default=ROOT / "hypersync-results" / "dr")
     ap.add_argument("--chunks-dir", type=Path,
                     default=ROOT / "hypersync-results" / "dr_full")

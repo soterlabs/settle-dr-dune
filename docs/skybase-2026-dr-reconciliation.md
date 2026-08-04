@@ -8,8 +8,9 @@
 > payment; June accrues at 0.5% (0.2% starts July); ONE open item — the
 > yearn payment address.
 
-**Date:** 2026-07-28. **Scope:** Skybase prime agent only, calendar 2026
-(settled window Jan–Jun). **Data:** [`skybase_2026_dr_reconciliation.csv`](skybase_2026_dr_reconciliation.csv)
+**Date:** 2026-07-28 (July calc added 2026-08-04). **Scope:** Skybase prime
+agent only, calendar 2026 (settled window Jan–Jul). **Data:**
+[`skybase_2026_dr_reconciliation.csv`](skybase_2026_dr_reconciliation.csv)
 (regenerate with `py/build_skybase_reconciliation.py`).
 
 ## Sources
@@ -28,24 +29,30 @@
   the legacy partners it forwards for: 1001, 1002, 1003, 1004, 1007, 1015,
   1016, 1017.
 
-## Headline reconciliation (Feb–Jun 2026, USD)
+## Headline reconciliation (Feb–Jun 2026 paid window + Jul calc, USD)
 
-| code | partner | calc Jan | calc Feb–Jun | paid Feb–Jun | diff (paid−calc) |
-|---|---|---|---|---|---|
-| 0 | Skybase (code 0) | 1,281 | 36,500 | 38,592 | **+2,092** |
-| 1 | Skybase (code 1) | 128,866 | 566,730 | 580,710 | **+13,980** |
-| 1001 | summerfi | 2,251 | 6,393 | 6,413 | +20 |
-| 1002 | defisaver | 1,970 | 132,881 | 132,890 | +9 |
-| 1003 | cow | 72,534 | 229,065 | 0 | **−229,065** |
-| 1004 | paraswap | 3,343 | 8,515 | 0 | **−8,515** |
-| 1007 | yearn | 10,083 | 54,479 | 54,478 | −1 |
-| 1015 | MOM | 0 | 0 | 0 | 0 |
-| 1016 | lazysummer | 1,201 | 177 | 178 | +1 |
-| 1017 | (1017) | 536 | 951 | 952 | +1 |
-| 10000 | L2 PSM3 default code 0 | 374 | 5,054 | *(memo — not a sheet column)* | |
+| code | partner | calc Jan | calc Feb–Jun | paid Feb–Jun | diff (paid−calc) | calc Jul (unpaid) |
+|---|---|---|---|---|---|---|
+| 0 | Skybase (code 0) | 1,281 | 36,500 | 38,592 | **+2,092** | 2,389 |
+| 1 | Skybase (code 1) | 128,866 | 566,730 | 580,710 | **+13,980** | 56,759 |
+| 1001 | summerfi | 2,251 | 6,393 | 6,413 | +20 | 419 |
+| 1002 | defisaver | 1,970 | 132,881 | 132,890 | +9 | 20,518 |
+| 1003 | cow | 72,534 | 229,065 | 0 | **−229,065** | 14,516 |
+| 1004 | paraswap | 3,343 | 8,515 | 0 | **−8,515** | 697 |
+| 1007 | yearn | 10,083 | 54,479 | 54,478 | −1 | 0 |
+| 1015 | MOM | 0 | 0 | 0 | 0 | 0 |
+| 1016 | lazysummer | 1,201 | 177 | 178 | +1 | 0 |
+| 1017 | (1017) | 536 | 951 | 952 | +1 | 4 |
+| 10000 | L2 PSM3 default code 0 | 374 | 5,054 | *(memo — not a sheet column)* | | 420 |
 
 Sheet DR subtotal Feb–Jun: **$814,214 paid** vs **$1,035,691 calculated**
 for the same code set (difference dominated by the two unpaid aggregators).
+
+**July 2026** (settled 2026-08, no payment lines yet): calculated at the
+blended rate — XR 0.5% through 2026-07-08, **0.2% from 2026-07-09** (Boosted-DR
+termination, Atlas Edit Weekly Cycle week of 2026-07-06; matches the sheet's
+"BOOSTED DR Changed July 9th" note). Skybase code-set July total: **$95,303**
+(of which code 1 $56,759, cow $14,516; L2 code-0 memo adds $420).
 
 ## Findings
 
@@ -77,14 +84,16 @@ for the same code set (difference dominated by the two unpaid aggregators).
    Skybase code set: **$222,065** (of which code 1 $128,866, cow $72,534).
    Either January was settled outside this sheet or it is outstanding —
    needs a definitive answer from the MSC side.
-6. **Rate-change flag:** the notes say the DR rate dropped 0.5% → 0.2%
-   "starting for June 2026", yet the June amounts actually paid (e.g. code 1
-   $117,784) are clearly still at 0.5%-scale and match our 0.5% calculation.
-   Our locked rate table has no June cut. If the cut is real and
-   retroactive, June is materially overpaid by both systems; if it applies
-   from July ("BOOSTED DR Changed July 9th"), our `rates_dr` needs the new
-   tier before any July settlement is computed. **Must be resolved before
-   the next MSC.**
+6. **Rate-change flag — RESOLVED 2026-08-04.** The cut is the termination of
+   the +0.3% **Boosted Distribution Reward Rate** on top of the 0.2% base
+   (Atlas Edit Weekly Cycle, week of 2026-07-06 — forum thread 28028),
+   ratified **2026-07-09** — matching the sheet's "BOOSTED DR Changed July
+   9th". June accrues fully at 0.5% (confirmed; the paid June amounts match
+   our 0.5% calculation). `rates_dr` now carries the tier: XR 0.5% through
+   2026-07-08, 0.2% from 2026-07-09 (`py/drhs/revenue/rates.py`; boundary
+   locked in `py/tests/test_revenue.py`). XR* (already 0.2% base, never
+   boosted) and XR-stUSDS (0.1%) are unaffected. July DR above is computed
+   on this blended schedule.
 
 ## Method notes
 
