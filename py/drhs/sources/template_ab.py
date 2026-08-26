@@ -337,6 +337,7 @@ def build_legs(
     excluded: frozenset[str] = frozenset(),
     synthetic: tuple[SyntheticProgram, ...] = (),
     reroute: frozenset[int] = frozenset(),
+    custody: tuple = (),
 ) -> pd.DataFrame:
     """Balance-change legs for ``targets``.
 
@@ -349,10 +350,12 @@ def build_legs(
 
     ``synthetic`` programs add pseudo-referral tags for aggregator deliveries
     (see ``SyntheticProgram``); ``reroute`` re-attaches intermediary-owned
-    referral codes to end recipients (see ``REROUTED_CODES``). Both are
-    applied to every target in the list.
+    referral codes to end recipients (see ``REROUTED_CODES``); ``custody``
+    perimeters count a strategy's named Morpho position as still-held (see
+    ``drhs.sources.custody``). All applied to every matching target.
     """
-    frames = [_legs_for_target(t, _end_ts(end_date), synthetic, reroute) for t in targets]
+    frames = [_legs_for_target(t, _end_ts(end_date), synthetic, reroute, custody)
+              for t in targets]
     frames = [f for f in frames if not f.empty]
     if not frames:
         return pd.DataFrame(columns=[
@@ -473,12 +476,15 @@ def legs_from_rows(
     t: Target, ref_rows, tr_rows, end_ts: int,
     synthetic: tuple[SyntheticProgram, ...] = (),
     reroute: frozenset[int] = frozenset(),
+    custody_rows: list = (),
 ) -> pd.DataFrame:
     """Pure: raw Referral + Transfer ``LogRow``s -> balance-change legs (A/B).
 
     ``synthetic`` programs contribute delivery pseudo-referrals; ``reroute``
     re-attaches intermediary-owned codes to end recipients. Precedence for the
     same (tx, user): real Referral > re-routed code > delivery pseudo-tag.
+    ``custody_rows`` — [(CustodyPerimeter, Morpho position LogRows)] — appends
+    the strategies' C-legs (see drhs.sources.custody; W-legs stay untouched).
     """
     latest = latest_referral_from_events(ref_rows)
     extra: dict[tuple[str, str], tuple[int, int]] = {}
@@ -488,16 +494,38 @@ def legs_from_rows(
         extra.update(rerouted_referrals(ref_rows, tr_rows, reroute))
     if extra:
         latest = merge_referrals(latest, extra)
-    return transfer_legs(t, tr_rows, latest, end_ts)
+    legs = transfer_legs(t, tr_rows, latest, end_ts)
+    if custody_rows:
+        from . import custody as custody_mod
+        frames = [legs] if not legs.empty else []
+        for perimeter, rows in custody_rows:
+            cl = custody_mod.custody_legs(t, rows, latest, end_ts, perimeter)
+            if not cl.empty:
+                frames.append(cl)
+        if frames:
+            legs = pd.concat(frames, ignore_index=True)
+    return legs
 
 
 def _legs_for_target(
     t: Target, end_ts: int,
     synthetic: tuple[SyntheticProgram, ...] = (),
     reroute: frozenset[int] = frozenset(),
+    custody: tuple = (),
 ) -> pd.DataFrame:
     ref_rows, tr_rows = fetch_target_rows(t, end_ts)
-    return legs_from_rows(t, ref_rows, tr_rows, end_ts, synthetic, reroute)
+    custody_rows = []
+    if custody:
+        from . import custody as custody_mod
+        from_block = hypersync.find_block_at_or_before(
+            t.blockchain,
+            int(datetime(t.start_date.year, t.start_date.month, t.start_date.day,
+                         tzinfo=timezone.utc).timestamp()))
+        to_block = hypersync.find_block_at_or_before(t.blockchain, end_ts - 1)
+        for p in custody:
+            if p.blockchain == t.blockchain and p.token == t.address.lower():
+                custody_rows.append((p, custody_mod.fetch_position_rows(p, from_block, to_block)))
+    return legs_from_rows(t, ref_rows, tr_rows, end_ts, synthetic, reroute, custody_rows)
 
 
 def _leg(t: Target, user: str, r, amount: float, ref: tuple[int, int] | None) -> dict:
