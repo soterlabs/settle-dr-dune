@@ -8,8 +8,9 @@
 > payment; June accrues at 0.5% (0.2% starts July); ONE open item — the
 > yearn payment address.
 
-**Date:** 2026-07-28 (July calc added 2026-08-04). **Scope:** Skybase prime
-agent only, calendar 2026 (settled window Jan–Jul). **Data:**
+**Date:** 2026-07-28 (July calc added 2026-08-04; August calc added
+2026-09-01). **Scope:** Skybase prime agent only, calendar 2026 (settled
+window Jan–Aug). **Data:**
 [`skybase_2026_dr_reconciliation.csv`](skybase_2026_dr_reconciliation.csv)
 (regenerate with `py/build_skybase_reconciliation.py`).
 
@@ -29,21 +30,21 @@ agent only, calendar 2026 (settled window Jan–Jul). **Data:**
   the legacy partners it forwards for: 1001, 1002, 1003, 1004, 1007, 1015,
   1016, 1017.
 
-## Headline reconciliation (Feb–Jun 2026 paid window + Jul calc, USD)
+## Headline reconciliation (Feb–Jun 2026 paid window + Jul/Aug calc, USD)
 
-| code | partner | calc Jan | calc Feb–Jun | paid Feb–Jun | diff (paid−calc) | calc Jul (unpaid) |
+| code | partner | calc Jan | calc Feb–Jun | paid Feb–Jun | diff (paid−calc) | calc Jul+Aug (unpaid) |
 |---|---|---|---|---|---|---|
-| 0 | Skybase (code 0) | 1,281 | 36,500 | 38,592 | **+2,092** | 2,389 |
-| 1 | Skybase (code 1) | 128,866 | 566,730 | 580,710 | **+13,980** | 56,759 |
-| 1001 | summerfi | 2,251 | 6,393 | 6,413 | +20 | 419 |
-| 1002 | defisaver | 1,970 | 132,881 | 132,890 | +9 | 20,518 |
-| 1003 | cow | 72,534 | 229,065 | 0 | **−229,065** | 14,516 |
-| 1004 | paraswap | 3,343 | 8,515 | 0 | **−8,515** | 697 |
+| 0 | Skybase (code 0) | 1,281 | 36,500 | 38,592 | **+2,092** | 3,994 |
+| 1 | Skybase (code 1) | 128,866 | 566,730 | 580,710 | **+13,980** | 95,053 |
+| 1001 | summerfi | 2,251 | 6,393 | 6,413 | +20 | 718 |
+| 1002 | defisaver | 1,970 | 132,881 | 132,890 | +9 | 33,980 |
+| 1003 | cow | 72,534 | 229,065 | 0 | **−229,065** | 24,116 |
+| 1004 | paraswap | 3,343 | 8,515 | 0 | **−8,515** | 983 |
 | 1007 | yearn | 10,083 | 54,479 | 54,478 | −1 | 0 |
 | 1015 | MOM | 0 | 0 | 0 | 0 | 0 |
 | 1016 | lazysummer | 1,201 | 177 | 178 | +1 | 0 |
-| 1017 | (1017) | 536 | 951 | 952 | +1 | 4 |
-| 10000 | L2 PSM3 default code 0 | 374 | 5,054 | *(memo — not a sheet column)* | | 420 |
+| 1017 | (1017) | 536 | 951 | 952 | +1 | 8 |
+| 10000 | L2 PSM3 default code 0 | 374 | 5,054 | *(memo — not a sheet column)* | | 599 |
 
 Sheet DR subtotal Feb–Jun: **$814,214 paid** vs **$1,035,691 calculated**
 for the same code set (difference dominated by the two unpaid aggregators).
@@ -53,6 +54,11 @@ blended rate — XR 0.5% through 2026-07-08, **0.2% from 2026-07-09** (Boosted-D
 termination, Atlas Edit Weekly Cycle week of 2026-07-06; matches the sheet's
 "BOOSTED DR Changed July 9th" note). Skybase code-set July total: **$95,303**
 (of which code 1 $56,759, cow $14,516; L2 code-0 memo adds $420).
+
+**August 2026** (settled 2026-09-01, no payment lines yet): fully at 0.2% XR.
+Skybase code-set August total: **$63,548** (of which code 1 $38,294,
+defisaver $13,462, cow $9,600, code 0 $1,605; L2 code-0 memo adds $179).
+Jul+Aug unpaid accrual for the code set: **$158,852**.
 
 ## Findings
 

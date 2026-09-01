@@ -240,8 +240,13 @@ def block_timestamp(chain: str, block: int, *, post: Callable[..., Any] = reques
     raise HyperSyncError(f"HyperSync {chain}: block {block} not returned")
 
 
-def _returnable_head(chain: str) -> tuple[int, int]:
-    """Exact highest query-returnable block on ``chain`` and its timestamp."""
+def returnable_head(chain: str) -> tuple[int, int]:
+    """Exact highest query-returnable block on ``chain`` and its timestamp.
+
+    ``archive_height`` alone is not probe-safe: blocks within a few hundred of
+    the head are frequently not yet query-returnable, and its 0 fallback would
+    send a probe negative — this walks back to the real returnable head.
+    """
     _STEP = 16
     high = archive_height(chain)
     above: int | None = None
@@ -256,7 +261,7 @@ def _returnable_head(chain: str) -> tuple[int, int]:
             above = high
             high -= _STEP
     if head_ts is None:
-        raise HyperSyncError(f"_returnable_head({chain}): no returnable block near head")
+        raise HyperSyncError(f"returnable_head({chain}): no returnable block near head")
     if above is not None and above - high > 1:
         lo, hi = high, above
         while lo + 1 < hi:
@@ -279,7 +284,7 @@ def find_block_at_or_before(chain: str, target_ts: int) -> int:
     as the archive catches up) and is NOT cached; ranges the archive fully
     covers are cached (result is final).
     """
-    high, head_ts = _returnable_head(chain)
+    high, head_ts = returnable_head(chain)
     if head_ts <= target_ts:
         _LOG.warning(
             "find_block_at_or_before(%s, ts=%d): archive head (block %d, ts %d) "

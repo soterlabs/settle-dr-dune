@@ -17,7 +17,14 @@ from pathlib import Path
 import pandas as pd
 
 REPO = Path(__file__).resolve().parent.parent
-MONTHS = [f"2026-{m:02d}" for m in range(1, 9)]
+sys.path.insert(0, str(REPO / "py"))
+from drhs.window import LAST_SETTLED_DAY  # noqa: E402
+
+# Settled months of 2026 — DERIVED from the deployed window (drhs/window.py)
+# so a settlement bump flows here without a second hand-edit; the guard in
+# main() only catches data-too-short, never a stale month list.
+MONTHS = [f"2026-{m:02d}" for m in
+          range(1, (LAST_SETTLED_DAY.month if LAST_SETTLED_DAY.year == 2026 else 12) + 1)]
 
 PARTNER = {0: "Skybase (code 0)", 1: "Skybase (code 1)", 1001: "summerfi",
            1002: "defisaver", 1003: "cow", 1004: "paraswap", 1007: "yearn",
