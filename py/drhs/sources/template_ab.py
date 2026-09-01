@@ -12,7 +12,7 @@ Mirrors queries/twa_stusds.sql:
     real counterparty's balance.
   * a leg's ref_code = the referral named for THAT user in the SAME tx (latest
     by log_index), else NA (ffilled in the TWA engine).
-  * scan window: date(ts) >= start_date AND ts < min(end_date, 2026-08-01).
+  * scan window: date(ts) >= start_date AND ts < min(end_date, DEFAULT_END).
 """
 
 from __future__ import annotations

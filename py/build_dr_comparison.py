@@ -24,7 +24,7 @@ NEW = REPO / "hypersync-results" / "dr_comparison_hypersync.xlsx"
 CHUNK_DIR = REPO / "hypersync-results" / "dr_full"
 
 AGG_CODES = {1003, 1004, 4011}
-MONTHS_2026 = [f"2026-{m:02d}" for m in range(1, 8)]
+MONTHS_2026 = [f"2026-{m:02d}" for m in range(1, 9)]
 
 # --- Payout eligibility windows per ref_code (ops-owned) -----------------------
 # Default: every venue is payable from 2026-01 (MSC settlement start), no end

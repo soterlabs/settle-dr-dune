@@ -12,6 +12,6 @@ re-run the chunked pipeline with a fresh chunks dir. Nothing else moves.
 """
 from datetime import date, timedelta
 
-# Deployed cutoff: events on/after 2026-08-01 are out of the settled window.
-DEFAULT_END = date(2026, 8, 1)
+# Deployed cutoff: events on/after 2026-09-01 are out of the settled window.
+DEFAULT_END = date(2026, 9, 1)
 LAST_SETTLED_DAY = DEFAULT_END - timedelta(days=1)

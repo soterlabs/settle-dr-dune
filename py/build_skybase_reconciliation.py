@@ -17,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 REPO = Path(__file__).resolve().parent.parent
-MONTHS = [f"2026-{m:02d}" for m in range(1, 8)]
+MONTHS = [f"2026-{m:02d}" for m in range(1, 9)]
 
 PARTNER = {0: "Skybase (code 0)", 1: "Skybase (code 1)", 1001: "summerfi",
            1002: "defisaver", 1003: "cow", 1004: "paraswap", 1007: "yearn",
