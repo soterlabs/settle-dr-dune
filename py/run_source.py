@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 load_dotenv(ROOT / ".env")
 
 from drhs import twa  # noqa: E402
-from drhs.sources import holder, template_ab, template_c, template_d  # noqa: E402
+from drhs.sources import custody, holder, template_ab, template_c, template_d  # noqa: E402
 
 _EXC = template_ab.TEMPLATE_A_EXCLUDED
 
@@ -44,6 +44,9 @@ class SourceSpec:
     # referral codes re-routed from their emitting intermediary to the end
     # recipient (template A only) — see template_ab.REROUTED_CODES.
     reroute: frozenset = field(default_factory=frozenset)
+    # custody perimeters: named Morpho positions counted as still-held
+    # (template A only) — see drhs.sources.custody.
+    custody: tuple = ()
 
 
 SPECS: dict[str, SourceSpec] = {
@@ -55,7 +58,8 @@ SPECS: dict[str, SourceSpec] = {
     # docs/cowswap-1003-double-attribution.md + docs/adding-an-aggregator.md.
     "susds_eth": SourceSpec(template_ab, [template_ab.SUSDS_ETH], 7877542, excluded=_EXC,
                             synthetic=(template_ab.COWSWAP,),
-                            reroute=template_ab.REROUTED_CODES),
+                            reroute=template_ab.REROUTED_CODES,
+                            custody=(custody.OSERO_GTSKYLOOPING,)),
     "susdc": SourceSpec(template_ab, template_ab.TEMPLATE_A_SUSDC, 7877542, excluded=_EXC),
     "susdc_mar": SourceSpec(
         template_ab, [template_ab.SUSDC_ETH, template_ab.SUSDC_BASE, template_ab.SUSDC_ARB],
@@ -101,6 +105,8 @@ def build_source_legs(name: str, end_date: date, *, include_synthetic: bool = Tr
             kw["synthetic"] = s.synthetic
         if s.reroute:
             kw["reroute"] = s.reroute
+        if s.custody:
+            kw["custody"] = s.custody
     return s.template.build_legs(targets if targets is not None else s.targets,
                                  end_date=end_date, excluded=s.excluded, **kw)
 
