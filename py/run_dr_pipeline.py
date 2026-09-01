@@ -20,7 +20,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -29,6 +29,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(Path(__file__).parent))
 load_dotenv(ROOT / ".env")
 
+from drhs import hypersync  # noqa: E402
 from drhs.revenue import pipeline  # noqa: E402
 from drhs.sources.template_ab import DEFAULT_END  # noqa: E402
 from run_dr_chunk import chunk_csv, chunk_plan, ensure_manifest, load_chunks  # noqa: E402
@@ -48,6 +49,26 @@ def _jobs(families: list[str] | None, chunks_dir: Path):
     return out
 
 
+def _check_archive_coverage(families: list[str], end: date) -> None:
+    """Refuse to settle a window the HyperSync archives have not fully
+    indexed yet: a head behind `end` silently truncates every chunk at a
+    DIFFERENT effective cutoff as the head advances mid-run (observed on the
+    Aug-2026 settlement: eth head was ~20h behind month-end at launch)."""
+    end_ts = int(datetime(end.year, end.month, end.day, tzinfo=timezone.utc).timestamp())
+    chains = sorted({t.blockchain for _f, _s, t, _n in chunk_plan(families).values()})
+    behind = []
+    for chain in chains:
+        head = hypersync.archive_height(chain) - 5
+        ts = hypersync.block_timestamp(chain, head)
+        if ts < end_ts:
+            behind.append(
+                f"{chain} (head {datetime.fromtimestamp(ts, tz=timezone.utc):%Y-%m-%d %H:%M}Z)")
+    if behind:
+        raise SystemExit(
+            f"[dr] archives not caught up to end={end}: {', '.join(behind)} — "
+            "wait for the archive heads to pass the window end, then rerun")
+
+
 def _run_chunked(families: list[str], args) -> int:
     jobs = _jobs(families, args.chunks_dir)
 
@@ -57,6 +78,7 @@ def _run_chunked(families: list[str], args) -> int:
             print(f"{csv.name:55s} {state}")
         return 0
 
+    _check_archive_coverage(families, args.end)
     if args.fresh:
         # wipe EVERYTHING (incl. out-of-plan strays and the manifest): a fresh
         # run must not inherit any file this plan does not account for.
@@ -130,7 +152,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sources", default=",".join(pipeline.SOURCE_MONTHLY),
                     help="comma-separated subset of: " + ",".join(pipeline.SOURCE_MONTHLY))
-    ap.add_argument("--end", type=_d, default=date(2026, 8, 1))
+    # Default derives from the settled window — a hardcoded literal here is
+    # exactly how the Aug-2026 settlement launched against the July window.
+    ap.add_argument("--end", type=_d, default=DEFAULT_END)
     ap.add_argument("--out", type=Path, default=ROOT / "hypersync-results" / "dr")
     ap.add_argument("--chunks-dir", type=Path,
                     default=ROOT / "hypersync-results" / "dr_full")
