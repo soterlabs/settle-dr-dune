@@ -1,7 +1,7 @@
 """Run one DR TWA source over HyperSync and write the shared-schema CSV.
 
 Usage:
-    .venv/bin/python py/run_source.py stusds [--end 2026-08-01] [--out PATH]
+    .venv/bin/python py/run_source.py stusds [--end YYYY-MM-DD] [--out PATH]
 
 Env: ENVIO_API_TOKEN (HyperSync auth). Loaded from repo-root .env.
 

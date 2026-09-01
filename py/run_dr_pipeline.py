@@ -1,6 +1,6 @@
 """Run the full DR pipeline off HyperSync (no Dune) and write the rollups.
 
-    .venv/bin/python py/run_dr_pipeline.py [--sources stusds,farms] [--end 2026-08-01]
+    .venv/bin/python py/run_dr_pipeline.py [--sources stusds,farms] [--end YYYY-MM-DD]
 
 Writes to hypersync-results/dr/:
     dr_monthly_combined.csv
@@ -30,9 +30,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 load_dotenv(ROOT / ".env")
 
 from drhs.revenue import pipeline  # noqa: E402
-from drhs.sources.template_ab import DEFAULT_END  # noqa: E402
+from drhs.window import DEFAULT_END, beyond_cutoff_message  # noqa: E402
 from run_dr_chunk import (chunk_csv, chunk_plan, check_archive_coverage,  # noqa: E402
-                          ensure_manifest, load_chunks)
+                          ensure_manifest, load_chunks, scan_chains)
 from run_source import build_source_legs  # noqa: E402
 
 
@@ -58,15 +58,17 @@ def _run_chunked(families: list[str], args) -> int:
             print(f"{csv.name:55s} {state}")
         return 0
 
-    # Probe only the chains this run will actually scan, BEFORE the --fresh
-    # wipe: lagging archives must refuse the run without destroying good
-    # checkpoints, and a combine-only rerun over complete checkpoints must
-    # stay fully offline.
-    plan = chunk_plan(families)
-    pending_chains = {plan[name][2].blockchain for name, _s, csv in jobs
-                      if args.fresh or not csv.exists()}
-    if pending_chains:
-        check_archive_coverage(pending_chains, args.end)
+    if not args.fresh:
+        # cheap local integrity first: a mismatched --end must be named before
+        # any network probing (with --fresh the manifest is wiped below anyway).
+        ensure_manifest(args.chunks_dir, args.end)
+    # Probe only the chains the pending chunks will scan (targets + conversion
+    # chains — see scan_chains), BEFORE the --fresh wipe: lagging archives must
+    # refuse the run without destroying good checkpoints, and a combine-only
+    # rerun over complete checkpoints stays fully offline (no pending -> no
+    # chains -> no probe).
+    pending = {name for name, _s, csv in jobs if args.fresh or not csv.exists()}
+    check_archive_coverage(scan_chains(pending), args.end)
     if args.fresh:
         # wipe EVERYTHING (incl. out-of-plan strays and the manifest): a fresh
         # run must not inherit any file this plan does not account for.
@@ -75,7 +77,7 @@ def _run_chunked(families: list[str], args) -> int:
         mf = args.chunks_dir / "manifest.json"
         if mf.exists():
             mf.unlink()
-    ensure_manifest(args.chunks_dir, args.end)
+        ensure_manifest(args.chunks_dir, args.end)
 
     failed: list[str] = []
     for name, shard, csv in jobs:
@@ -118,8 +120,7 @@ def _combine_chunks(families: list[str], args) -> int:
 
 
 def _run_monolithic(families: list[str], args) -> int:
-    check_archive_coverage(
-        {t.blockchain for _f, _s, t, _n in chunk_plan(families).values()}, args.end)
+    check_archive_coverage(scan_chains(chunk_plan(families)), args.end)
     per_source = {}
     for key in families:
         print(f"[dr] computing monthly DR for {key} ...", flush=True)
@@ -160,10 +161,7 @@ def main() -> int:
     if unknown:
         ap.error(f"unknown sources: {unknown}")
     if args.end > DEFAULT_END:
-        ap.error(f"--end {args.end} is beyond the deployed scan cutoff {DEFAULT_END}; "
-                 "extend the settlement window first (bump DEFAULT_END in "
-                 "drhs/window.py — the single home; the fill and conversion caps "
-                 "derive from it)")
+        ap.error(beyond_cutoff_message(args.end))
     if args.monolithic:
         return _run_monolithic(families, args)
     return _run_chunked(families, args)
