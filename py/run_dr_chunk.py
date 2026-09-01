@@ -13,7 +13,7 @@ The chunk registry is DERIVED from pipeline.SOURCE_MONTHLY x run_source.SPECS
 
 Usage:
     .venv/bin/python py/run_dr_chunk.py <chunk> [--shard k/N]
-        [--end 2026-08-01] [--chunks-dir hypersync-results/dr_full]
+        [--end YYYY-MM-DD] [--chunks-dir hypersync-results/dr_full]
     .venv/bin/python py/run_dr_chunk.py --list
 """
 
@@ -24,7 +24,7 @@ import json
 import os
 import re
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -32,9 +32,9 @@ sys.path.insert(0, str(REPO / "py"))
 from dotenv import load_dotenv
 load_dotenv(REPO / ".env")
 
-from drhs import twa  # noqa: E402
+from drhs import hypersync, twa  # noqa: E402
 from drhs.revenue import conversion, deployment, monthly, pipeline  # noqa: E402
-from drhs.sources.template_ab import DEFAULT_END  # noqa: E402
+from drhs.window import DEFAULT_END, beyond_cutoff_message, midnight_ts  # noqa: E402
 from run_source import SPECS, build_source_legs  # noqa: E402
 
 DEFAULT_CHUNKS_DIR = REPO / "hypersync-results" / "dr_full"
@@ -65,6 +65,54 @@ def chunk_plan(families: list[str] | None = None) -> dict[str, tuple]:
                     raise ValueError(f"duplicate chunk name {name}")
                 plan[name] = (family, src, t, SHARDS.get((src, t.blockchain, t.symbol)))
     return plan
+
+
+def scan_chains(names) -> set[str]:
+    """Every chain the given chunks will scan: their targets' chains PLUS the
+    chains of the conversion/deployment series each family builds regardless
+    of target (conversion.susds_rates/stusds_rates hardcode ethereum;
+    sp_vault_rates adds avalanche_c). The coverage guard must include them —
+    an L2-only run would otherwise pass the probe while the ethereum-based
+    conversion series head-clamps and forward-fills a stale rate."""
+    plan = chunk_plan()
+    chains: set[str] = set()
+    for name in names:
+        family, _src, t, _n = plan[name]
+        chains |= {t.blockchain, "ethereum"}
+        if pipeline.SOURCE_MONTHLY[family][3]:  # is_sp
+            chains.add("avalanche_c")
+    return chains
+
+
+def check_archive_coverage(chains, end: date) -> None:
+    """Refuse to scan a window the HyperSync archives have not fully indexed
+    yet: a head behind ``end`` silently truncates the scan at a DIFFERENT
+    effective cutoff as the head advances mid-run (observed on the Aug-2026
+    settlement: the eth head was ~20h behind month-end at launch). Called by
+    the orchestrator for the chains its pending chunks will scan, and by this
+    worker for its own — so a documented standalone chunk rerun gets the same
+    protection as an orchestrated launch."""
+    end_ts = midnight_ts(end)
+    behind, unreachable = [], []
+    for chain in sorted(set(chains)):
+        try:
+            _blk, ts = hypersync.returnable_head(chain)
+        except hypersync.HyperSyncError as e:
+            unreachable.append(f"{chain} ({e})")
+            continue
+        if ts < end_ts:
+            behind.append(
+                f"{chain} (head {datetime.fromtimestamp(ts, tz=timezone.utc):%Y-%m-%d %H:%M}Z)")
+    if behind or unreachable:
+        parts = []
+        if behind:
+            parts.append(f"archives not caught up to end={end}: {', '.join(behind)} — "
+                         "wait for the archive heads to pass the window end")
+        if unreachable:
+            parts.append(f"archive unreachable/inconsistent (coverage of end={end} "
+                         f"cannot be verified): {', '.join(unreachable)} — retry "
+                         "when HyperSync responds")
+        raise SystemExit("; ".join(parts))
 
 
 def chunk_csv(chunks_dir: Path, name: str, shard: str | None) -> Path:
@@ -200,15 +248,13 @@ def main() -> int:
         return 0
 
     if args.end > DEFAULT_END:
-        raise SystemExit(
-            f"--end {args.end} is beyond the deployed scan cutoff {DEFAULT_END}: every "
-            "source caps its window there, so later months would be silently empty. "
-            "Extend the settlement window first (DEFAULT_END in drhs/sources/template_ab.py).")
+        raise SystemExit(beyond_cutoff_message(args.end))
     ensure_manifest(args.chunks_dir, args.end)
     out = chunk_csv(args.chunks_dir, args.chunk, args.shard)
     if out.exists():
         print(f"[{args.chunk}] {out.name} exists, skipping")
         return 0
+    check_archive_coverage(scan_chains([args.chunk]), args.end)
     m = compute_chunk(args.chunk, args.shard, args.end)
     # atomic checkpoint: a kill mid-write must never leave a truncated CSV
     # that a resume would accept as complete.

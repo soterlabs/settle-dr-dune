@@ -23,8 +23,19 @@ OLD = REPO / "dune-results" / "dr_comparison_latest.xlsx"
 NEW = REPO / "hypersync-results" / "dr_comparison_hypersync.xlsx"
 CHUNK_DIR = REPO / "hypersync-results" / "dr_full"
 
+from drhs.window import LAST_SETTLED_DAY  # noqa: E402
+
 AGG_CODES = {1003, 1004, 4011}
-MONTHS_2026 = [f"2026-{m:02d}" for m in range(1, 8)]
+# Settled months of 2026 — DERIVED from the deployed window so a settlement
+# bump in drhs/window.py flows here without a second hand-edit (the manifest
+# guard below only catches data-too-short, never a stale month list). The
+# builder is 2026-scoped by design (columns, reference tabs): any other year
+# must fail LOUDLY before deriving, not silently freeze at 12 or 0 months.
+if LAST_SETTLED_DAY.year != 2026:
+    raise SystemExit(
+        f"this workbook builder is 2026-scoped but the settled window ends "
+        f"{LAST_SETTLED_DAY} — extend the builder's year handling first")
+MONTHS_2026 = [f"2026-{m:02d}" for m in range(1, LAST_SETTLED_DAY.month + 1)]
 
 # --- Payout eligibility windows per ref_code (ops-owned) -----------------------
 # Default: every venue is payable from 2026-01 (MSC settlement start), no end
