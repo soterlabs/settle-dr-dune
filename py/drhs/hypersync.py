@@ -148,12 +148,78 @@ def query_logs(
     block_fields: list[str] | None = None,
     post: Callable[..., Any] = requests.post,
 ) -> QueryResult:
-    """Fetch all logs matching ``selections`` in ``[from_block, to_block]`` (inclusive).
+    """Fetch all logs matching ``selections`` in ``[from_block, to_block]``
+    (inclusive) — served from the persistent log cache where possible, with
+    only uncovered blocks fetched live (drhs.logcache; disable via
+    DRHS_NO_LOG_CACHE=1 or the pipeline's --no-cache for the pre-cache,
+    all-network behaviour).
 
     ``selections`` is HyperSync's ``logs`` array — each entry is
     ``{"address": [...], "topics": [[topic0...], [topic1...], ...]}``; multiple
-    entries are OR'd. Pages are followed via ``next_block`` until ``to_block``.
+    entries are OR'd. An injected ``post`` (tests, fixtures) always bypasses
+    the cache: fake responses must never be persisted as chain truth.
     """
+    from drhs import logcache
+
+    lf = log_fields or _DEFAULT_LOG_FIELDS
+    if post is not requests.post or not logcache.enabled():
+        return _query_logs_live(chain, selections, from_block, to_block,
+                                log_fields=log_fields, block_fields=block_fields,
+                                post=post)
+
+    key = logcache.cache_key(chain, selections, lf)
+    d = logcache.entry_dir(chain, key)
+    meta = logcache.load_meta(d)
+    meta_args = {"chain": chain, "selections": selections, "log_fields": lf}
+    depth = logcache.SAFE_DEPTH_BLOCKS.get(chain, logcache._DEFAULT_SAFE_DEPTH)
+    result = QueryResult()
+
+    # Coverage starts above the request: fill downward first (cache-only —
+    # blocks below existing coverage are final by construction). Fetch up to
+    # cached_from-1 even if the request ends lower: coverage must stay
+    # contiguous, and the surplus is persisted, not returned.
+    if meta is not None and from_block < meta.cached_from:
+        low = _query_logs_live(chain, selections, from_block, meta.cached_from - 1,
+                               log_fields=log_fields, block_fields=block_fields)
+        meta = logcache.append_segment(d, meta, meta_args, low.rows,
+                                       from_block, meta.cached_from - 1)
+        result.archive_height = low.archive_height
+
+    cov_hi = meta.cached_through if meta is not None else from_block - 1
+    if meta is not None and min(to_block, cov_hi) >= from_block:
+        result.rows.extend(logcache.read_rows(d, meta, from_block,
+                                              min(to_block, cov_hi)))
+
+    if to_block > cov_hi:
+        live_from = max(from_block, cov_hi + 1)
+        live = _query_logs_live(chain, selections, live_from, to_block,
+                                log_fields=log_fields, block_fields=block_fields)
+        result.rows.extend(live.rows)
+        result.archive_height = max(result.archive_height, live.archive_height)
+        # Persist only blocks a safe depth below the head observed by THIS
+        # fetch — the young tail stays live-only until a later run re-fetches
+        # it past the depth.
+        safe_hi = min(to_block, live.archive_height - depth)
+        if safe_hi >= live_from:
+            logcache.append_segment(
+                d, meta, meta_args,
+                [r for r in live.rows if r.block_number <= safe_hi],
+                live_from, safe_hi)
+    return result
+
+
+def _query_logs_live(
+    chain: str,
+    selections: list[dict[str, Any]],
+    from_block: int,
+    to_block: int,
+    *,
+    log_fields: list[str] | None = None,
+    block_fields: list[str] | None = None,
+    post: Callable[..., Any] = requests.post,
+) -> QueryResult:
+    """The raw network fetch — pages followed via ``next_block`` until
+    ``to_block``. Always complete or raising; never partial."""
     lf = log_fields or _DEFAULT_LOG_FIELDS
     bf = block_fields or _DEFAULT_BLOCK_FIELDS
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {_token()}"}

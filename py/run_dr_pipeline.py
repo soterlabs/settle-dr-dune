@@ -18,6 +18,7 @@ and debugging, but OOMs the 3.7GB production box on a full run.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from datetime import date, datetime
@@ -154,7 +155,13 @@ def main() -> int:
     ap.add_argument("--list", action="store_true", help="print the chunk plan and exit")
     ap.add_argument("--monolithic", action="store_true",
                     help="legacy in-process path (OOMs the 3.7GB box on a full run)")
+    ap.add_argument("--no-cache", action="store_true",
+                    help="bypass the persistent log cache: every scan fetches "
+                         "from the network (pre-cache behaviour; audit escape "
+                         "hatch — see drhs/logcache.py)")
     args = ap.parse_args()
+    if args.no_cache:
+        os.environ["DRHS_NO_LOG_CACHE"] = "1"  # inherited by chunk subprocesses
 
     families = [k.strip() for k in args.sources.split(",")]
     unknown = [k for k in families if k not in pipeline.SOURCE_MONTHLY]
