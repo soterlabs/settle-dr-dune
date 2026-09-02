@@ -50,10 +50,22 @@ Trusted by default, with an escape hatch and on-demand verification:
 questions ("is this month computed for this window" vs "what did the chain
 say"). To force a clean slate of both: `--fresh --no-cache`.
 
-## Validation
+## Validation (run 2026-09-02, this box)
 
-Landed with: the full unit suite (`py/tests/test_logcache.py` — exact replay,
-safe-depth tail, upward/downward extension, key sensitivity, bypasses,
-corruption refusal) plus an end-to-end reproduction: a `--fresh` pipeline run
-with the cache (populating it as it went) reproduced the settled August 2026
-`dr_monthly_combined.csv` byte-identically.
+- **Exactness**: a `--fresh` full-pipeline run with the cache (populating as
+  it went) reproduced ALL THREE settled August 2026 outputs
+  (`dr_monthly_combined.csv` + both rollups) **byte-identically**.
+- **Integrity**: `verify_log_cache.py --samples 2` — 102 sampled block
+  ranges across all 51 entries re-fetched live, every row of every field
+  matched.
+- **Speed**: the population run took **3h40m** end-to-end vs ~11h for the
+  cache-less August settlement. Base shards 1–7 (cache hits) took **4–6
+  minutes each** vs 45–60 minutes each over the network; only shard 0 paid
+  the one-time download. Future settlements fetch just the new month's
+  blocks everywhere.
+- **Footprint**: full history for all 6 chains / 51 query entries =
+  **168MB** of zstd parquet; peak worker RSS unchanged (~2.9GB on the big
+  Base shards — same rows in memory, different transport).
+- Unit suite: `py/tests/test_logcache.py` — exact replay, safe-depth tail,
+  upward/downward extension, key sensitivity, both bypasses, corruption
+  refusal, contiguity enforcement.
