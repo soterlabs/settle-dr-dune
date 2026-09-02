@@ -287,3 +287,149 @@ def test_excluded_contract_tag_produces_no_legs():
     # ...but the excluded filter (applied in build_legs) removes the user's legs
     filtered = raw[~raw["user_addr"].str.lower().isin(template_ab.TEMPLATE_A_EXCLUDED)]
     assert not (filtered["user_addr"] == morpho).any()
+
+
+# --- Osero 3006 via Jumper Earn (Li.Fi): two-hop re-route ---------------------
+# On-chain shape (docs/osero-codes.md): Jumper's deposit adapter J mints the
+# shares with Referral(3006) on itself, hands them to the LiFiDiamond L (net 0),
+# and L delivers to the user. Neither J nor L keeps anything.
+J = "0xe69b860fb5f12552b9c7675966ef9522fb734232"   # Jumper Earn deposit adapter
+L = "0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae"   # LiFiDiamond
+SUSDC_BASE = template_ab.SUSDC_BASE
+
+
+def _jumper_tx(tx, user, amount, *, block=100, ts=DAY, code=3006):
+    tr = [_tr(tx, 1, "0x" + "0" * 40, J, amount, block=block, ts=ts),   # vault mints to the adapter
+          _tr(tx, 3, J, L, amount, block=block, ts=ts),
+          _tr(tx, 4, L, user, amount, block=block, ts=ts)]
+    rf = [_ref(tx, 2, J, code, block=block, ts=ts)]
+    return tr, rf
+
+
+def test_3006_is_rerouted_and_follows_hops():
+    assert 3006 in REROUTED_CODES
+    assert 3006 in template_ab.REROUTE_FOLLOW_HOPS
+    assert 1004 not in template_ab.REROUTE_FOLLOW_HOPS   # settled rule untouched
+    assert 4011 not in template_ab.REROUTE_FOLLOW_HOPS
+
+
+def test_jumper_two_hop_reroute_tags_end_user_only():
+    tr, rf = _jumper_tx("0xt1", A, 1899.94)
+    tags = rerouted_referrals(rf + _warm(J, 3006), tr, REROUTED_CODES)
+    assert tags == {("0xt1", A): (4, 3006)}          # final delivery edge's log_index
+    assert ("0xt1", L) not in tags and ("0xt1", J) not in tags
+
+
+def test_two_hop_not_followed_for_direct_rule_codes():
+    """Same graph under 1004 (not in REROUTE_FOLLOW_HOPS): the hop stops it,
+    exactly as before — settled Paraswap/1inch attribution is byte-identical."""
+    tr, rf = _jumper_tx("0xt1", A, 100.0, code=1004)
+    assert rerouted_referrals(rf + _warm(J, 1004), tr, REROUTED_CODES) == {}
+
+
+def test_hop_following_stops_at_retaining_contract():
+    """A net-positive recipient along the chain is an END recipient (tagged),
+    never a hop — the walk must not continue through a contract that keeps
+    the balance (pooled-holder relabel is the accepted, explicit outcome)."""
+    tr = [_tr("0xt1", 1, "0x" + "0" * 40, J, 100.0),
+          _tr("0xt1", 3, J, L, 100.0),
+          _tr("0xt1", 4, L, D, 100.0),              # D keeps 70, pays 30 on to A
+          _tr("0xt1", 5, D, A, 30.0)]
+    rf = [_ref("0xt1", 2, J, 3006)] + _warm(J, 3006)
+    tags = rerouted_referrals(rf, tr, REROUTED_CODES)
+    assert tags == {("0xt1", D): (4, 3006)}          # A is not reached through D
+
+
+def test_hop_following_cycle_safe():
+    """A forwarder that bounces the token back must not loop the walk."""
+    tr = [_tr("0xt1", 1, "0x" + "0" * 40, J, 10.0),
+          _tr("0xt1", 3, J, L, 10.0), _tr("0xt1", 4, L, J, 10.0),   # bounce
+          _tr("0xt1", 5, J, L, 10.0), _tr("0xt1", 6, L, A, 10.0)]
+    rf = [_ref("0xt1", 2, J, 3006)] + _warm(J, 3006)
+    assert rerouted_referrals(rf, tr, REROUTED_CODES) == {("0xt1", A): (6, 3006)}
+
+
+def test_jumper_end_to_end_on_susdc_target():
+    """Through legs_from_rows on an sUSDC L2 target: the user's balance carries
+    3006 from the deposit day on; adapter and Diamond produce zero-balance legs
+    only (they net to 0 in the tx)."""
+    tr, rf = _jumper_tx("0xt1", A, 500.0)
+    legs = template_ab.legs_from_rows(SUSDC_BASE, rf + _warm(J, 3006), tr, DAY + 2 * 86400,
+                                      (), REROUTED_CODES)
+    out = twa.compute_twa(legs, fill_through=date(2025, 1, 2))
+    a = out[out["user_addr"] == A]
+    assert set(a["ref_code"].astype(int)) == {3006}
+    assert abs(a["time_weighted_avg_balance"].iloc[-1] - 500.0) < 1e-9
+    assert not (out["user_addr"].isin([J, L]) & (out["time_weighted_avg_balance"] > 0)).any()
+
+
+def test_susdc_sources_carry_reroute():
+    from run_source import SPECS
+    for name in ("susds_eth", "susdc", "susdc_mar", "susdc_jun"):
+        assert 3006 in SPECS[name].reroute, name
+
+
+# --- entrypoint-anchored programs (1inch → Skybase 1020) -------------------------
+from drhs.sources.template_ab import EntrypointProgram, ONEINCH_SKYBASE  # noqa: E402
+
+V6 = "0x111111125421ca6dc452d289314280a0f8842a65"
+EXEC = "0x5141b82f5ffda4c6fe1e372978f1c5427640a190"   # a 1inch solver executor
+ONEINCH_OPEN = EntrypointProgram("t", 1020, ONEINCH_SKYBASE.entrypoints)  # no window
+
+
+def _tr_to(tx, li, frm, to, amount, tx_to, **kw):
+    r = _tr(tx, li, frm, to, amount, **kw)
+    return LogRow(**{**r.__dict__, "tx_to": tx_to})
+
+
+def test_entrypoint_resolves_from_tx_to():
+    rows = [_tr_to("0xr", 1, EXEC, A, 10.0, V6), _tr_to("0xo", 1, D, A, 10.0, D)]
+    prog = ONEINCH_OPEN.resolve_from_rows(rows)
+    assert isinstance(prog, SyntheticProgram)
+    assert prog.txs == {"0xr"} and prog.contracts == frozenset() and prog.ref_code == 1020
+
+
+def test_entrypoint_tags_any_sender_and_mints_in_anchored_txs():
+    rows = [_tr_to("0xr1", 1, EXEC, A, 10.0, V6),                 # executor delivers
+            _tr_to("0xr2", 1, "0x" + "0" * 40, E, 5.0, V6),      # vault mints straight to user
+            _tr_to("0xr3", 1, V6, D, 3.0, V6),                   # router delivers directly
+            _tr_to("0xo", 1, EXEC, R, 10.0, D)]                  # same executor, other entrypoint
+    prog = ONEINCH_OPEN.resolve_from_rows(rows)
+    tags = synthetic_referrals(rows, (prog,))
+    assert tags == {("0xr1", A): (1, 1020), ("0xr2", E): (1, 1020), ("0xr3", D): (1, 1020)}
+
+
+def test_entrypoint_forwarders_not_tagged():
+    rows = [_tr_to("0xr", 1, "0x" + "0" * 40, EXEC, 10.0, V6),   # mint to executor (net 0)
+            _tr_to("0xr", 2, EXEC, V6, 10.0, V6),                 # router hop (net 0)
+            _tr_to("0xr", 3, V6, A, 10.0, V6)]                    # user (net +)
+    prog = ONEINCH_OPEN.resolve_from_rows(rows)
+    assert synthetic_referrals(rows, (prog,)) == {("0xr", A): (3, 1020)}
+
+
+def test_entrypoint_window_and_precedence_with_4011_reroute():
+    """Inside the window the executor's real Referral(4011), re-routed, beats
+    the 1020 pseudo-tag (settled precedence); a plain 1inch tx gets 1020."""
+    rows = [_tr_to("0xa", 2, EXEC, A, 10.0, V6), _tr_to("0xb", 2, EXEC, D, 10.0, V6)]
+    rf = [_ref("0xa", 1, EXEC, 4011)] + _warm(EXEC, 4011)
+    prog = ONEINCH_OPEN.resolve_from_rows(rows)
+    legs = template_ab.legs_from_rows(SUSDS, rf, rows, DAY + 86400, (prog,), REROUTED_CODES)
+    code = lambda w: set(legs[legs["user_addr"] == w]["ref_code"].dropna().astype(int))
+    assert code(A) == {4011} and code(D) == {1020}
+    # outside the eligibility window nothing is tagged
+    windowed = EntrypointProgram("w", 1020, ONEINCH_SKYBASE.entrypoints, start=date(2025, 1, 2))
+    assert synthetic_referrals(rows, (windowed.resolve_from_rows(rows),)) == {}
+
+
+def test_entrypoint_program_wired_and_provisional_start():
+    from run_source import SPECS
+    names = [getattr(p, "name", None) for p in SPECS["susds_eth"].synthetic]
+    assert "oneinch_skybase" in names
+    assert ONEINCH_SKYBASE.start == date(2026, 9, 1)     # no settled month re-attributed by default
+    assert len(ONEINCH_SKYBASE.entrypoints) == 3
+
+
+def test_logrow_tx_to_defaults_none_for_fixtures():
+    r = _tr("0xt", 1, S, A, 1.0)
+    assert r.tx_to is None
+    assert ONEINCH_OPEN.resolve_from_rows([r]).txs == frozenset()

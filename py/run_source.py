@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 load_dotenv(ROOT / ".env")
 
 from drhs import twa  # noqa: E402
-from drhs.sources import custody, holder, template_ab, template_c, template_d  # noqa: E402
+from drhs.sources import custody, holder, lifi, template_ab, template_c, template_d  # noqa: E402
 
 _EXC = template_ab.TEMPLATE_A_EXCLUDED
 
@@ -56,16 +56,24 @@ SPECS: dict[str, SourceSpec] = {
     # carries the aggregator programs: CowSwap 1003 (delivery pseudo-referrals)
     # and the re-routed router codes 1004 Paraswap / 4011 1inch — see
     # docs/cowswap-1003-double-attribution.md + docs/adding-an-aggregator.md.
+    # ...plus the Li.Fi integrator-anchored program for Osero's frontend (3900,
+    # docs/lifi-oserofrontend.md) and Skybase's 1inch entrypoint program (1020,
+    # docs/oneinch-1020-skybase.md) — both resolved per target at fetch time.
     "susds_eth": SourceSpec(template_ab, [template_ab.SUSDS_ETH], 7877542, excluded=_EXC,
-                            synthetic=(template_ab.COWSWAP,),
+                            synthetic=(template_ab.COWSWAP, lifi.OSERO_FRONTEND,
+                                       template_ab.ONEINCH_SKYBASE),
                             reroute=template_ab.REROUTED_CODES,
                             custody=(custody.OSERO_GTSKYLOOPING,)),
-    "susdc": SourceSpec(template_ab, template_ab.TEMPLATE_A_SUSDC, 7877542, excluded=_EXC),
+    # sUSDC also carries the re-routed codes: Osero's 3006 lands on Jumper Earn's
+    # Li.Fi deposit adapter on base/arbitrum/optimism (58 of its 65 events).
+    "susdc": SourceSpec(template_ab, template_ab.TEMPLATE_A_SUSDC, 7877542, excluded=_EXC,
+                        reroute=template_ab.REROUTED_CODES),
     "susdc_mar": SourceSpec(
         template_ab, [template_ab.SUSDC_ETH, template_ab.SUSDC_BASE, template_ab.SUSDC_ARB],
-        7877542, excluded=_EXC),
+        7877542, excluded=_EXC, reroute=template_ab.REROUTED_CODES),
     "susdc_jun": SourceSpec(
-        template_ab, [template_ab.SUSDC_OPT, template_ab.SUSDC_UNI], 7877542, excluded=_EXC),
+        template_ab, [template_ab.SUSDC_OPT, template_ab.SUSDC_UNI], 7877542, excluded=_EXC,
+        reroute=template_ab.REROUTED_CODES),
     # Template C — L2 sUSDS via PSM3 Swap ref_code (balance from token Transfer).
     "susds_psm3": SourceSpec(template_c, template_c.ALL, 7877543, ref_kind="swaps", excluded=_EXC),
     "susds_psm3_base": SourceSpec(template_c, [template_c.BASE], 7877543, ref_kind="swaps", excluded=_EXC),
