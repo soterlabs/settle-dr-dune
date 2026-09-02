@@ -193,10 +193,11 @@ def query_logs(
     if to_block < from_block:
         return QueryResult()  # degenerate range: empty, like the live path
 
-    key = logcache.cache_key(chain, selections, lf)
+    key = logcache.cache_key(chain, selections, lf, with_tx_to)
     d = logcache.entry_dir(chain, key)
     meta = logcache.load_meta(d)
-    meta_args = {"chain": chain, "selections": selections, "log_fields": lf}
+    meta_args = {"chain": chain, "selections": selections, "log_fields": lf,
+                 "with_tx_to": with_tx_to}
     depth = logcache.SAFE_DEPTH_BLOCKS.get(chain, logcache._DEFAULT_SAFE_DEPTH)
     result = QueryResult()
 

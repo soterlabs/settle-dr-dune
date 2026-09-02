@@ -231,3 +231,56 @@ def test_meta_under_wrong_key_dir_is_refused():
     shutil.copytree(good, swapped)
     assert logcache.load_meta(good) is not None
     assert logcache.load_meta(swapped) is None
+
+
+# --- the transaction join (LogRow.tx_to) and the cache -----------------------
+
+def row_tx(bn, tx_to):
+    return LogRow(**{**row(bn).__dict__, "tx_to": tx_to})
+
+
+def test_with_tx_to_is_part_of_the_key_but_only_when_true():
+    lf = hypersync._DEFAULT_LOG_FIELDS
+    assert logcache.cache_key(CHAIN, SEL, lf, with_tx_to=True) != logcache.cache_key(CHAIN, SEL, lf)
+    # pre-existing entries keep their key: False must hash exactly like the old 3-arg form
+    assert logcache.cache_key(CHAIN, SEL, lf, with_tx_to=False) == logcache.cache_key(CHAIN, SEL, lf)
+
+
+def test_join_query_never_served_from_a_plain_entry():
+    """A plain Transfer scan cached first; the same selection WITH the join must
+    fetch live (its rows carry tx_to), not replay the tx_to-less entry."""
+    plain = fake_live({100: [row(100)]}, head=1000)
+    with mock.patch.object(hypersync, "_query_logs_live", plain):
+        _q(100, 500)
+    joined = fake_live({100: [row_tx(100, "0xrouter")]}, head=1000)
+    with mock.patch.object(hypersync, "_query_logs_live", joined):
+        r1 = hypersync.query_logs(CHAIN, SEL, 100, 500, with_tx_to=True)
+        r2 = hypersync.query_logs(CHAIN, SEL, 100, 500, with_tx_to=True)
+    assert joined.calls == [(100, 500)]                 # live once, then cached
+    assert r1.rows[0].tx_to == "0xrouter" and r2.rows[0].tx_to == "0xrouter"   # survives parquet
+    # and the join flag reaches the live fetch
+    seen = []
+    def spy(chain, selections, fb, tb, **kw):
+        seen.append(kw.get("with_tx_to")); return QueryResult(rows=[], archive_height=1000)
+    with mock.patch.object(hypersync, "_query_logs_live", spy):
+        hypersync.query_logs(CHAIN, SEL, 2000, 2100, with_tx_to=True)
+    assert seen == [True]
+
+
+def test_segment_written_before_tx_to_existed_still_reads(tmp_path):
+    """Entries persisted by the pre-join code have no tx_to column: they must
+    replay with tx_to=None instead of failing on a missing column."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    d = logcache.entry_dir(CHAIN, logcache.cache_key(CHAIN, SEL, hypersync._DEFAULT_LOG_FIELDS))
+    d.mkdir(parents=True)
+    old_cols = [c for c in logcache._columns() if c != "tx_to"]
+    r = row(100)
+    pq.write_table(pa.table({c: [getattr(r, c)] for c in old_cols}), d / "seg_100_700.parquet")
+    m = logcache.Meta(chain=CHAIN, selections=SEL, log_fields=hypersync._DEFAULT_LOG_FIELDS,
+                      cached_from=100, cached_through=700,
+                      segments=[{"file": "seg_100_700.parquet", "from": 100, "to": 700}])
+    logcache._write_meta(d, m)
+    assert logcache.load_meta(d) is not None          # meta without with_tx_to loads (default False)
+    rows = logcache.read_rows(d, m, 100, 700)
+    assert len(rows) == 1 and rows[0].tx_to is None and rows[0].transaction_hash == "0x64"

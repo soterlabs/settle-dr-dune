@@ -58,10 +58,12 @@ code > pseudo-tag), last-wins termination and the exclusion guard are untouched.
 `txs=None` (CowSwap) is byte-identical to before.
 
 Cost: the Diamond cannot be filtered on the integrator server-side, so the scan
-is chunked (300k blocks), decoded and dropped per chunk, and the **kept rows
-are cached per chunk** (an indexed block range is immutable) — the first run
-pays the scan, later runs read the cache. The scan is bounded below by the
-program's `start`.
+is chunked (300k blocks) and decoded-and-dropped per chunk — a full window never
+sits in memory. Persistence is the pipeline's **log cache**
+([`log-cache.md`](log-cache.md)): the first run downloads the Diamond stream
+(1.2M events on ethereum, 5.2M on base for Mar–Sep 2026 — a few GB of parquet),
+later runs replay it from disk. The scan is bounded below by the program's
+`start`.
 
 ## Precedence vs Li.Fi's own code 4012
 

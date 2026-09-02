@@ -204,10 +204,11 @@ def anchored_deliveries(
 
 # --- Fetch ------------------------------------------------------------------------
 # The Diamond is high-volume (1.2M events / 6 months on ethereum) and HyperSync
-# cannot filter on the integrator string (non-indexed), so the scan is chunked:
-# each chunk is decoded and dropped, only matching rows are kept — and cached,
-# since a fully-indexed block range is immutable. Re-runs cost one cache read
-# per chunk.
+# cannot filter on the integrator string (non-indexed), so the scan is chunked
+# and each chunk is decoded and dropped, keeping only matching rows — a full
+# window never sits in memory. Persistence is the pipeline's log cache
+# (``hypersync.query_logs`` → drhs.logcache): the first run pays the download,
+# later runs replay the Diamond stream from parquet.
 _SCAN_STEP = 300_000
 
 
@@ -216,16 +217,7 @@ def _scan(chain: str, selections: list[dict], from_block: int, to_block: int,
     kept: list[hypersync.LogRow] = []
     for lo in range(from_block, to_block + 1, _SCAN_STEP):
         hi = min(lo + _SCAN_STEP - 1, to_block)
-        final = hi == to_block   # may be head-clamped → not cached
-        ck = hypersync._key("lifi_scan", tag, chain, lo, hi)
-        hit = None if final else hypersync._cache_get(ck)
-        if hit is not None:
-            kept.extend(hit)
-            continue
-        rows = [r for r in hypersync.query_logs(chain, selections, lo, hi).rows if keep(r)]
-        if not final:
-            hypersync._cache_put(ck, rows)
-        kept.extend(rows)
+        kept.extend(r for r in hypersync.query_logs(chain, selections, lo, hi).rows if keep(r))
     return kept
 
 
