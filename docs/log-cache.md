@@ -24,7 +24,9 @@ events moves from network to disk.
   `LogRow.tx_to`, used by entrypoint-anchored programs): an entry fetched
   without the join has `tx_to = None` on every row and must never satisfy a
   query that needs it. Segments written before `tx_to` existed replay with
-  `tx_to = None` (missing parquet columns default). Any change
+  `tx_to = None` (missing parquet columns default); `meta.json` carries
+  `with_tx_to` only when true, so entries without the join stay loadable by
+  a pre-join checkout sharing the cache dir. Any change
   to what is asked for — one more address, one more topic — is a *different*
   entry; there is no partial reuse and no way to serve the wrong query.
   Adding a venue to SPECS simply creates new entries.

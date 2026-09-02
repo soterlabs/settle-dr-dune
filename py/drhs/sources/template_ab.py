@@ -24,7 +24,7 @@ from datetime import date, datetime, timezone
 import pandas as pd
 
 from .. import events, hypersync
-from ..window import DEFAULT_END  # noqa: F401 — canonical home is drhs/window.py;
+from ..window import DEFAULT_END, midnight_ts  # noqa: F401 — canonical home is drhs/window.py;
 # re-exported here because every runner/template historically imports it from
 # this module.
 
@@ -108,10 +108,31 @@ class EntrypointProgram:
     end: date | None = None
 
     def resolve_from_rows(self, tr_rows) -> "SyntheticProgram":
+        """Pure core: Transfer rows carrying ``tx_to`` -> the anchored program."""
         txs = frozenset(r.transaction_hash for r in tr_rows
                         if r.tx_to in self.entrypoints and r.transaction_hash)
         return SyntheticProgram(self.name, self.ref_code, frozenset(),
                                 start=self.start, end=self.end, txs=txs)
+
+    def resolve(self, target: "Target", from_block: int, to_block: int, end_ts: int
+                ) -> "SyntheticProgram":
+        """Fetch the target's Transfer rows WITH the transaction join over the
+        program's eligibility window only, and resolve. A separate, bounded
+        query on purpose: joining the pipeline's full Transfer history would
+        re-key its largest cache entries and maintain a second copy forever,
+        for rows the window can never tag."""
+        if self.start is not None:
+            from_block = max(from_block, hypersync.find_block_at_or_before(
+                target.blockchain, midnight_ts(self.start)))
+        rows = hypersync.query_logs(
+            target.blockchain,
+            [{"address": [target.address.lower()], "topics": [[events.TRANSFER_TOPIC0]]}],
+            from_block, to_block, with_tx_to=True,
+        ).rows
+        prog = self.resolve_from_rows(rows)
+        _LOG.info("entrypoint[%s] %s: %d Transfer rows in window -> %d anchored txs",
+                  self.name, target.blockchain, len(rows), len(prog.txs))
+        return prog
 
 
 # Skybase's 1inch program: swaps entering through the 1inch AggregationRouter
@@ -170,9 +191,14 @@ def synthetic_referrals(
         if r.transaction_hash is None:
             continue
         frm = events.topic_to_addr(r.topic1)
+        if frm not in by_contract and r.transaction_hash not in by_tx:
+            continue  # nobody's delivery — the common case, skip the rest
         to = events.topic_to_addr(r.topic2)
         if to == events.ZERO_ADDR or to in by_contract:
             continue
+        # a contract shared by several programs yields one candidate per
+        # program at the same log_index; the LAST program in the tuple wins
+        # (pass 3 uses >=), matching the pre-multi-program behaviour.
         cands = list(by_contract.get(frm, ())) + list(by_tx.get(r.transaction_hash, ()))
         for p in cands:
             if not p.active_at(r.block_time):
@@ -214,7 +240,7 @@ def synthetic_referrals(
                 continue  # forwarder (solver/router/hop) — not the final holder
             key = (tx, wallet)
             prev = out.get(key)
-            if prev is None or log_index > prev[0]:
+            if prev is None or log_index >= prev[0]:   # ties: last program wins
                 out[key] = (log_index, p.ref_code)
 
     # Mint-path canary: delivery-based tagging cannot see a solver minting the
@@ -384,17 +410,21 @@ def rerouted_referrals(
                 continue  # owner retains (partner vault) — keep its attribution
             chase = code in follow_hops
             seen = {owner}
-            frontier = [owner]
+            # (address, log_index of the edge that reached it): a hop's onward
+            # transfers count only if they come AFTER it received the shares —
+            # on a shared router (the LiFiDiamond) an unrelated earlier
+            # delivery out of the same hop must not inherit the code.
+            frontier: list[tuple[str, int]] = [(owner, -1)]
             while frontier:
-                nxt: list[str] = []
-                for hop in frontier:
+                nxt: list[tuple[str, int]] = []
+                for hop, since in frontier:
                     for log_index, wallet in edges.get(hop, ()):
-                        if wallet in seen or wallet in owners:
-                            continue  # cycle / another intermediary owner
+                        if log_index <= since or wallet in seen or wallet in owners:
+                            continue  # before the hop was funded / cycle / another owner
                         if net.get((tx, wallet), 0) <= 0:
                             seen.add(wallet)
                             if chase:
-                                nxt.append(wallet)   # forwarder hop — keep following
+                                nxt.append((wallet, log_index))   # forwarder hop — keep following
                             continue
                         key = (tx, wallet)
                         prev = out.get(key)
@@ -473,29 +503,30 @@ def build_legs(
     return legs
 
 
-def fetch_target_rows(t: Target, end_ts: int, *, with_tx_to: bool = False):
+def target_block_range(t: Target, end_ts: int) -> tuple[int, int]:
+    """[from_block, to_block] of ``t``'s scan window. start_date (hardcoded
+    2024-09-01) can precede an L2's genesis (e.g. unichain): scan from genesis
+    — matches Dune, which simply finds no events before the chain existed."""
+    try:
+        from_block = hypersync.find_block_at_or_before(t.blockchain, midnight_ts(t.start_date))
+    except hypersync.HyperSyncError:
+        from_block = 0
+    return from_block, hypersync.find_block_at_or_before(t.blockchain, end_ts - 1)
+
+
+def fetch_target_rows(t: Target, end_ts: int):
     """Fetch the raw Referral + Transfer ``LogRow``s for ``t`` over the scan
     window. Split from the pure leg logic so fixtures can capture these rows
-    and tests can replay ``legs_from_rows`` offline. ``with_tx_to`` joins the
-    tx entrypoint onto the Transfer rows (entrypoint-anchored programs)."""
+    and tests can replay ``legs_from_rows`` offline."""
     addr = t.address.lower()
-    start_ts = int(datetime(t.start_date.year, t.start_date.month, t.start_date.day,
-                            tzinfo=timezone.utc).timestamp())
-    try:
-        from_block = hypersync.find_block_at_or_before(t.blockchain, start_ts)
-    except hypersync.HyperSyncError:
-        # start_date (hardcoded 2024-09-01) can precede an L2's genesis
-        # (e.g. unichain). Scan from genesis — matches Dune, which simply finds
-        # no events before the chain existed.
-        from_block = 0
-    to_block = hypersync.find_block_at_or_before(t.blockchain, end_ts - 1)
+    from_block, to_block = target_block_range(t, end_ts)
     ref_rows = hypersync.query_logs(
         t.blockchain, [{"address": [addr], "topics": [[events.REFERRAL_TOPIC0]]}],
         from_block, to_block,
     ).rows
     tr_rows = hypersync.query_logs(
         t.blockchain, [{"address": [addr], "topics": [[events.TRANSFER_TOPIC0]]}],
-        from_block, to_block, with_tx_to=with_tx_to,
+        from_block, to_block,
     ).rows
     return ref_rows, tr_rows
 
@@ -615,31 +646,24 @@ def legs_from_rows(
 
 def _legs_for_target(
     t: Target, end_ts: int,
-    synthetic: tuple[SyntheticProgram, ...] = (),
+    synthetic: tuple = (),
     reroute: frozenset[int] = frozenset(),
     custody: tuple = (),
 ) -> pd.DataFrame:
-    entry = [p for p in synthetic if isinstance(p, EntrypointProgram)]
-    ref_rows, tr_rows = fetch_target_rows(t, end_ts, with_tx_to=bool(entry))
-    if entry:
-        synthetic = tuple(p.resolve_from_rows(tr_rows) if isinstance(p, EntrypointProgram) else p
-                          for p in synthetic)
+    ref_rows, tr_rows = fetch_target_rows(t, end_ts)
+    # anchored programs (lifi.IntegratorProgram, EntrypointProgram) resolve per
+    # target — each fetches its own bounded anchor data — into a concrete
+    # SyntheticProgram (tx set + delivery contracts).
     unresolved = [p for p in synthetic if not isinstance(p, SyntheticProgram)]
     custody_rows = []
     if custody or unresolved:
-        from_block = hypersync.find_block_at_or_before(
-            t.blockchain,
-            int(datetime(t.start_date.year, t.start_date.month, t.start_date.day,
-                         tzinfo=timezone.utc).timestamp()))
-        to_block = hypersync.find_block_at_or_before(t.blockchain, end_ts - 1)
+        from_block, to_block = target_block_range(t, end_ts)
     if custody:
         from . import custody as custody_mod
         for p in custody:
             if p.blockchain == t.blockchain and p.token == t.address.lower():
                 custody_rows.append((p, custody_mod.fetch_position_rows(p, from_block, to_block)))
     if unresolved:
-        # anchored programs (drhs.sources.lifi.IntegratorProgram) resolve to a
-        # concrete SyntheticProgram — tx set + delivery contracts — per target.
         synthetic = tuple(p if isinstance(p, SyntheticProgram)
                           else p.resolve(t, from_block, to_block, end_ts) for p in synthetic)
     return legs_from_rows(t, ref_rows, tr_rows, end_ts, synthetic, reroute, custody_rows)

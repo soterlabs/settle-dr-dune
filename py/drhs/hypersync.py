@@ -317,6 +317,15 @@ def _query_logs_live(
                         f"HyperSync {chain} response has a log at block {bn} "
                         f"with no matching block timestamp — refusing to misdate."
                     )
+                if with_tx_to and _lower(lg.get("transaction_hash")) not in to_by_tx:
+                    # same contract as the timestamp join: complete or raising,
+                    # never a silent None that would be persisted under the
+                    # join key and resolve an entrypoint program to nothing.
+                    raise HyperSyncError(
+                        f"HyperSync {chain} response has a log in tx "
+                        f"{lg.get('transaction_hash')} with no matching transaction "
+                        f"— tx join incomplete, refusing to persist tx_to=None."
+                    )
                 result.rows.append(
                     LogRow(
                         block_number=bn,

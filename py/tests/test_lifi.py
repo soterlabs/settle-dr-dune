@@ -239,3 +239,19 @@ def test_program_wired_on_susds_eth():
     from run_source import SPECS
     names = [getattr(p, "name", None) for p in SPECS["susds_eth"].synthetic]
     assert "lifi_oserofrontend" in names and "cowswap" in names
+
+
+def test_blocks_for_only_falls_back_on_pre_genesis(monkeypatch):
+    from drhs import hypersync as hs
+    def boom(chain, ts):
+        raise hs.HyperSyncError("HyperSync ethereum -> HTTP 503")
+    monkeypatch.setattr(hs, "find_block_at_or_before", boom)
+    import pytest
+    with pytest.raises(hs.HyperSyncError, match="503"):
+        lifi._blocks_for("ethereum", 1, 2)
+    def genesis(chain, ts):
+        if ts == 1:
+            raise hs.HyperSyncError("find_block_at_or_before(unichain, ts=1): target precedes genesis.")
+        return 42
+    monkeypatch.setattr(hs, "find_block_at_or_before", genesis)
+    assert lifi._blocks_for("unichain", 1, 3) == (0, 42)   # end_ts-1 = 2 resolves normally

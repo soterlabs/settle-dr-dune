@@ -130,7 +130,11 @@ def _write_meta(d: Path, m: Meta) -> None:
     # later os.replace wins and the loser's update is lost, which load_meta
     # tolerates (still self-consistent) and the next run refetches.
     tmp = d / f"meta.json.{os.getpid()}.tmp"
-    tmp.write_text(json.dumps(m.__dict__))
+    # Serialise ``with_tx_to`` only when True: entries without the join keep a
+    # meta.json a pre-join checkout can still load (its Meta(**json) would
+    # reject the unknown field, treat the entry as absent and rewrite it).
+    body = {k: v for k, v in m.__dict__.items() if not (k == "with_tx_to" and not v)}
+    tmp.write_text(json.dumps(body))
     os.replace(tmp, d / "meta.json")
 
 

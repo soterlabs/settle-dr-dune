@@ -284,3 +284,32 @@ def test_segment_written_before_tx_to_existed_still_reads(tmp_path):
     assert logcache.load_meta(d) is not None          # meta without with_tx_to loads (default False)
     rows = logcache.read_rows(d, m, 100, 700)
     assert len(rows) == 1 and rows[0].tx_to is None and rows[0].transaction_hash == "0x64"
+
+
+def test_tx_join_incomplete_raises_instead_of_persisting_none():
+    """A page with logs but no matching transactions must raise (like the
+    timestamp join), never persist tx_to=None under the join key."""
+    page = {"data": [{"blocks": [{"number": 100, "timestamp": 1}],
+                      "transactions": [],                      # join truncated
+                      "logs": [{"block_number": 100, "log_index": 0, "address": "0xtoken",
+                                "topic0": "0xt0", "data": "0x", "transaction_hash": "0x64"}]}],
+            "next_block": 101, "archive_height": 1000}
+    class R:  # minimal requests.Response stand-in
+        ok = True; status_code = 200; text = ""
+        def json(self): return page
+    with pytest.raises(hypersync.HyperSyncError, match="tx join incomplete"):
+        hypersync._query_logs_live(CHAIN, SEL, 100, 100, with_tx_to=True, post=lambda *a, **k: R())
+    # without the join the same page is fine (tx_to stays None by design)
+    rows = hypersync._query_logs_live(CHAIN, SEL, 100, 100, post=lambda *a, **k: R()).rows
+    assert rows[0].tx_to is None
+
+
+def test_meta_omits_with_tx_to_when_false_for_pre_join_readers(tmp_path):
+    import json
+    d = tmp_path / "e"; d.mkdir()
+    m = logcache.Meta(chain=CHAIN, selections=SEL, log_fields=["a"], cached_from=1, cached_through=2, segments=[])
+    logcache._write_meta(d, m)
+    assert "with_tx_to" not in json.loads((d / "meta.json").read_text())   # loadable by Meta(**json) of old code
+    m2 = logcache.Meta(chain=CHAIN, selections=SEL, log_fields=["a"], cached_from=1, cached_through=2, segments=[], with_tx_to=True)
+    logcache._write_meta(d, m2)
+    assert json.loads((d / "meta.json").read_text())["with_tx_to"] is True

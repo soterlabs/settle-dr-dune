@@ -33,10 +33,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date
 
 from .. import hypersync
-from ..events import topic_to_addr
+from ..events import _word, decode_uint, topic_to_addr
+from ..window import midnight_ts
 
 _LOG = logging.getLogger(__name__)
 
@@ -68,16 +69,12 @@ CHAIN_ID: dict[str, int] = {
 
 
 # --- ABI decoding -------------------------------------------------------------
-def _w(h: str, i: int) -> str:
-    return h[i * 64:(i + 1) * 64]
-
-
 def _abi_string(h: str, base: int, head: int) -> str:
     """Dynamic ``string`` whose offset sits at head word ``head``; the offset
     is relative to word ``base`` (0 for a flat arg list, the tuple's first
     word for a tuple)."""
-    p = base + int(_w(h, head), 16) // 32
-    n = int(_w(h, p), 16)
+    p = base + decode_uint(_word(h, head)) // 32
+    n = decode_uint(_word(h, p))
     return bytes.fromhex(h[(p + 1) * 64:(p + 1) * 64 + 2 * n]).decode("utf-8", "replace")
 
 
@@ -107,29 +104,29 @@ def decode_generic_swap(r: hypersync.LogRow) -> GenericSwap:
     return GenericSwap(
         transaction_id=(r.topic1 or "").lower(),
         integrator=_abi_string(h, 0, 0),
-        receiver=topic_to_addr(_w(h, 2)),
-        from_asset=topic_to_addr(_w(h, 3)),
-        to_asset=topic_to_addr(_w(h, 4)),
-        to_amount=int(_w(h, 6), 16),
+        receiver=topic_to_addr(_word(h, 2)),
+        from_asset=topic_to_addr(_word(h, 3)),
+        to_asset=topic_to_addr(_word(h, 4)),
+        to_amount=decode_uint(_word(h, 6)),
     )
 
 
 def decode_transfer_started(r: hypersync.LogRow) -> TransferStarted:
     h = r.data.removeprefix("0x")
-    b = int(_w(h, 0), 16) // 32          # the tuple is one dynamic arg: word0 = its offset
+    b = decode_uint(_word(h, 0)) // 32          # the tuple is one dynamic arg: word0 = its offset
     return TransferStarted(
-        transaction_id="0x" + _w(h, b),
+        transaction_id="0x" + _word(h, b),
         bridge=_abi_string(h, b, b + 1),
         integrator=_abi_string(h, b, b + 2),
-        receiver=topic_to_addr(_w(h, b + 5)),
-        sending_asset=topic_to_addr(_w(h, b + 4)),
-        destination_chain_id=int(_w(h, b + 7), 16),
-        has_destination_call=bool(int(_w(h, b + 9), 16)),
+        receiver=topic_to_addr(_word(h, b + 5)),
+        sending_asset=topic_to_addr(_word(h, b + 4)),
+        destination_chain_id=decode_uint(_word(h, b + 7)),
+        has_destination_call=bool(decode_uint(_word(h, b + 9))),
     )
 
 
 def asset_swapped_transaction_id(r: hypersync.LogRow) -> str:
-    return "0x" + _w(r.data.removeprefix("0x"), 0)
+    return "0x" + _word(r.data.removeprefix("0x"), 0)
 
 
 # --- The program ---------------------------------------------------------------
@@ -213,7 +210,7 @@ _SCAN_STEP = 300_000
 
 
 def _scan(chain: str, selections: list[dict], from_block: int, to_block: int,
-          keep, tag: str) -> list[hypersync.LogRow]:
+          keep) -> list[hypersync.LogRow]:
     kept: list[hypersync.LogRow] = []
     for lo in range(from_block, to_block + 1, _SCAN_STEP):
         hi = min(lo + _SCAN_STEP - 1, to_block)
@@ -224,8 +221,10 @@ def _scan(chain: str, selections: list[dict], from_block: int, to_block: int,
 def _blocks_for(chain: str, start_ts: int, end_ts: int) -> tuple[int, int]:
     try:
         fb = hypersync.find_block_at_or_before(chain, start_ts)
-    except hypersync.HyperSyncError:
-        fb = 0   # start precedes the chain's genesis
+    except hypersync.HyperSyncError as exc:
+        if "precedes genesis" not in str(exc):
+            raise   # transport / auth failure: never silently scan from block 0
+        fb = 0      # start precedes the chain's genesis
     return fb, hypersync.find_block_at_or_before(chain, end_ts - 1)
 
 
@@ -236,11 +235,9 @@ def resolve(program: IntegratorProgram, target, from_block: int, to_block: int, 
     from .template_ab import SyntheticProgram   # local: template_ab is import-neutral
 
     chain = target.blockchain
-    start_ts = int(datetime(target.start_date.year, target.start_date.month,
-                            target.start_date.day, tzinfo=timezone.utc).timestamp())
+    start_ts = midnight_ts(target.start_date)
     if program.start is not None:
-        start_ts = max(start_ts, int(datetime(program.start.year, program.start.month,
-                                              program.start.day, tzinfo=timezone.utc).timestamp()))
+        start_ts = max(start_ts, midnight_ts(program.start))
         from_block = max(from_block, hypersync.find_block_at_or_before(chain, start_ts))
 
     def _gen(r):
@@ -257,27 +254,28 @@ def resolve(program: IntegratorProgram, target, from_block: int, to_block: int, 
         return program.matches(d.integrator) and d.destination_chain_id == CHAIN_ID[chain]
 
     generic = _scan(chain, [{"address": [LIFI_DIAMOND], "topics": [[GENERIC_SWAP_COMPLETED_TOPIC0]]}],
-                    from_block, to_block, _gen, f"generic:{program.integrator.lower()}")
+                    from_block, to_block, _gen)
     started: list[hypersync.LogRow] = []
     for oc in program.origin_chains:
         if oc == chain or oc not in hypersync.HYPERSYNC_HOSTS:
             continue
         ofb, otb = _blocks_for(oc, start_ts, end_ts)
         started += _scan(oc, [{"address": [LIFI_DIAMOND], "topics": [[TRANSFER_STARTED_TOPIC0]]}],
-                         ofb, otb, _started, f"started:{program.integrator.lower()}->{chain}")
+                         ofb, otb, _started)
     ids = {decode_transfer_started(r).transaction_id for r in started}
     completed: list[hypersync.LogRow] = []
     swapped: list[hypersync.LogRow] = []
     if ids:
-        # transactionId is indexed on LiFiTransferCompleted → server-side filter,
-        # any emitter (Executor / Receiver variants). AssetSwapped carries it in
-        # data → chunked scan of the Executor, kept if the id matches.
-        completed = hypersync.query_logs(
-            chain, [{"topics": [[TRANSFER_COMPLETED_TOPIC0], sorted(ids)]}], from_block, to_block).rows
+        # Both destination events are scanned by topic0 only and matched to the
+        # id set client-side: embedding the (growing) id list in the selection
+        # would give the query a new cache key every month. LiFiTransferCompleted
+        # may come from any emitter (Executor / Receiver variants); AssetSwapped
+        # from the Executor.
+        completed = _scan(chain, [{"topics": [[TRANSFER_COMPLETED_TOPIC0]]}], from_block, to_block,
+                          lambda r: (r.topic1 or "").lower() in ids)
         swapped = _scan(chain, [{"address": [LIFI_EXECUTOR], "topics": [[ASSET_SWAPPED_TOPIC0]]}],
                         from_block, to_block,
-                        lambda r: asset_swapped_transaction_id(r) in ids,
-                        f"swapped:{program.integrator.lower()}->{chain}")
+                        lambda r: asset_swapped_transaction_id(r) in ids)
     txs, contracts = anchored_deliveries(program, chain, generic, started, completed, swapped)
     _LOG.info("lifi[%s] %s: %d same-chain + %d cross-chain anchors -> %d txs, %d delivery contracts",
               program.name, chain, len(generic), len(ids), len(txs), len(contracts))

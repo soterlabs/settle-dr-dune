@@ -32,10 +32,13 @@ Jun 2026, then 28 (Jul 2026), 31 (Aug 2026).
 ## Mechanism
 
 `EntrypointProgram(name, ref_code, entrypoints, start, end)` in
-`template_ab`. At fetch time the target's `Transfer` rows are pulled **with the
-transaction join** (`hypersync.query_logs(..., with_tx_to=True)` fills
-`LogRow.tx_to` — same scan, slightly more payload, no second pass); the
-program resolves to a `SyntheticProgram` with `txs = {tx : tx.to ∈ entrypoints}`
+`template_ab`. At fetch time the program pulls **its own** `Transfer` rows for
+the target **with the transaction join** (`hypersync.query_logs(...,
+with_tx_to=True)` fills `LogRow.tx_to`), bounded below by its eligibility
+start — a separate query on purpose, so the pipeline's full Transfer stream
+keeps its cache entry and no second copy of two years of history is ever
+maintained; the join is keyed separately in the log cache. The program
+resolves to a `SyntheticProgram` with `txs = {tx : tx.to ∈ entrypoints}`
 and an **empty** `contracts` set, which `synthetic_referrals` reads as: inside
 an anchored tx, **every incoming transfer — mints included — to a wallet that
 ends the tx net-positive** is a delivery. Forwarders (executors, the router

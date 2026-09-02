@@ -75,7 +75,9 @@ This is a registry entry — no new code:
 
    Programs in one source terminate each other automatically (last delivery
    wins), so overlap wallets (48 CowSwap∩Paraswap wallets in the audit) are
-   split into correctly attributed segments, never double counted.
+   split into correctly attributed segments, never double counted. Two
+   programs anchored on the **same** delivery contract in the **same** tx tie
+   on `log_index`; the tie goes to the **last program in the tuple**.
 
 3. **Tests**: add cases to `py/tests/test_synthetic.py` (delivery tagged,
    forwarder not tagged, window enforced, cross-program termination). The
@@ -113,8 +115,10 @@ not tagged. Some integrations forward twice — Jumper Earn's Sky deposit adapte
 mints with 3006, hands the shares to the LiFiDiamond, and the Diamond delivers
 to the user — so nothing would be re-routed. For those, add the code to
 `template_ab.REROUTE_FOLLOW_HOPS` as well: the walk then continues through
-net-zero forwarders to the first net-positive recipients. It is opt-in per
-code on purpose — 1004 / 4011 were settled under the direct rule and must stay
+net-zero forwarders to the first net-positive recipients — following only
+transfers that happen **after** the hop received the shares, so an unrelated
+earlier delivery out of a shared router never inherits the code. It is opt-in
+per code on purpose — 1004 / 4011 were settled under the direct rule and must stay
 byte-identical. See [`osero-codes.md`](osero-codes.md).
 
 Wire `reroute=template_ab.REROUTED_CODES` on **every source whose token the
@@ -128,9 +132,12 @@ Delivery comes from rotating per-solver executors or straight from pools
 shape A cannot see it. Only the tx *entrypoint* (`tx.to`) identifies the
 program. `template_ab.EntrypointProgram(name, code, entrypoints, start, end)`:
 
-- the target's `Transfer` rows are fetched **with the transaction join**
-  (`query_logs(..., with_tx_to=True)` → `LogRow.tx_to`), same scan, no second
-  pass — the program resolves to `txs = {tx : tx.to ∈ entrypoints}`;
+- the program fetches **its own** `Transfer` rows with the transaction join
+  (`query_logs(..., with_tx_to=True)` → `LogRow.tx_to`) over its eligibility
+  window only, and resolves to `txs = {tx : tx.to ∈ entrypoints}`. The
+  pipeline's full Transfer stream is left alone on purpose: joining it would
+  re-key the largest cache entries and maintain a second copy forever for rows
+  the window can never tag;
 - inside those txs, **every incoming transfer (mints included) to a
   net-positive wallet** is a delivery; forwarders net to ≤ 0 and are skipped —
   all other rules and precedence unchanged.

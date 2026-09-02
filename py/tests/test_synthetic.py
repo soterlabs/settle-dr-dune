@@ -434,3 +434,43 @@ def test_logrow_tx_to_defaults_none_for_fixtures():
     r = _tr("0xt", 1, S, A, 1.0)
     assert r.tx_to is None
     assert ONEINCH_OPEN.resolve_from_rows([r]).txs == frozenset()
+
+
+# --- review fixes: tie rule, temporal hop guard, bounded entrypoint fetch --------
+
+def test_shared_contract_tie_last_program_in_tuple_wins():
+    """Two programs anchored on the same contract AND the same tx: the last
+    program in the tuple wins (the pre-multi-program by_contract semantics)."""
+    a = SyntheticProgram("a", 3900, frozenset({L}), txs=frozenset({"0x1"}))
+    b = SyntheticProgram("b", 3901, frozenset({L}), txs=frozenset({"0x1"}))
+    rows = [_tr("0x1", 1, L, A, 1.0)]
+    assert synthetic_referrals(rows, (a, b)) == {("0x1", A): (1, 3901)}
+    assert synthetic_referrals(rows, (b, a)) == {("0x1", A): (1, 3900)}
+
+
+def test_hop_following_ignores_edges_before_the_hop_was_funded():
+    """Shared router L: an unrelated earlier delivery L->U1 (log 2) must not
+    inherit 3006 when J funds L later (log 8) and L delivers to U2 (log 9)."""
+    U1, U2 = A, D
+    rows = [_tr("0xt", 1, R, L, 5.0), _tr("0xt", 2, L, U1, 5.0),          # unrelated leg, earlier
+            _tr("0xt", 7, "0x" + "0" * 40, J, 10.0), _tr("0xt", 8, J, L, 10.0),
+            _tr("0xt", 9, L, U2, 10.0)]
+    rf = [_ref("0xt", 7, J, 3006)] + _warm(J, 3006)
+    tags = rerouted_referrals(rf, rows, REROUTED_CODES)
+    assert tags == {("0xt", U2): (9, 3006)}
+
+
+def test_entrypoint_resolve_fetches_bounded_joined_window(monkeypatch):
+    """resolve() fetches its own Transfer rows WITH the join, from the program's
+    start — never re-keying the pipeline's full Transfer stream."""
+    from drhs import hypersync as hs
+    calls = []
+    def fake_query(chain, selections, fb, tb, **kw):
+        calls.append((fb, tb, kw.get("with_tx_to")))
+        return hs.QueryResult(rows=[_tr_to("0xr", 1, EXEC, A, 1.0, V6)])
+    monkeypatch.setattr(hs, "query_logs", fake_query)
+    monkeypatch.setattr(hs, "find_block_at_or_before", lambda chain, ts: 5_000)   # block at program.start
+    prog = EntrypointProgram("t", 1020, ONEINCH_SKYBASE.entrypoints, start=date(2026, 9, 1))
+    resolved = prog.resolve(SUSDS, 0, 9_000, DAY)
+    assert calls == [(5_000, 9_000, True)]          # bounded below by start, joined
+    assert resolved.txs == {"0xr"} and resolved.contracts == frozenset()
