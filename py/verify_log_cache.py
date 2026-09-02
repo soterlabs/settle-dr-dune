@@ -63,11 +63,9 @@ def main() -> int:
             cached = logcache.read_rows(d, meta, lo, hi)
             live = _query_logs_live(chain, sels, lo, hi,
                                     log_fields=meta.log_fields).rows
-            def _k(r):
-                return (r.block_number, r.log_index, r.block_time, r.address,
-                        r.topic0, r.topic1, r.topic2, r.topic3, r.data,
-                        r.transaction_hash)
-            ok = sorted(map(_k, cached)) == sorted(map(_k, live))
+            import dataclasses
+            ok = sorted(map(dataclasses.astuple, cached)) \
+                == sorted(map(dataclasses.astuple, live))
             tag = "OK" if ok else "MISMATCH"
             print(f"[{chain}/{d.name}] sample {i + 1}/{args.samples} "
                   f"blocks [{lo},{hi}]: cached={len(cached)} live={len(live)} {tag}")

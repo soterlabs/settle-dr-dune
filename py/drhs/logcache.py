@@ -29,6 +29,7 @@ cached ranges live and diffs them for on-demand assurance.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -49,12 +50,16 @@ SAFE_DEPTH_BLOCKS: dict[str, int] = {
 }
 _DEFAULT_SAFE_DEPTH = 14400
 
-_COLUMNS = ["block_number", "log_index", "block_time", "address",
-            "topic0", "topic1", "topic2", "topic3", "data", "transaction_hash"]
+def _columns() -> list[str]:
+    """Parquet schema == LogRow, DERIVED — a hand-mirrored list would silently
+    drop or shift fields when LogRow changes."""
+    from drhs.hypersync import LogRow
+    return [f.name for f in dataclasses.fields(LogRow)]
 
 
 def enabled() -> bool:
-    return not os.environ.get("DRHS_NO_LOG_CACHE")
+    # falsy spellings must not disable the cache: only an affirmative value does
+    return os.environ.get("DRHS_NO_LOG_CACHE", "").lower() in ("", "0", "false", "no")
 
 
 def cache_key(chain: str, selections: list[dict[str, Any]],
@@ -96,6 +101,9 @@ def load_meta(d: Path) -> Meta | None:
         m = Meta(**json.loads(p.read_text()))
     except Exception:  # noqa: BLE001 — corrupt meta: treat as no cache
         return None
+    if cache_key(m.chain, m.selections, m.log_fields) != d.name:
+        return None  # entry moved/swapped under a wrong key (ops mishap):
+        # its content answers a different query — refuse, refetch
     lo = m.cached_from
     for seg in m.segments:
         if seg["from"] != lo or not (d / seg["file"]).exists():
@@ -107,7 +115,11 @@ def load_meta(d: Path) -> Meta | None:
 
 
 def _write_meta(d: Path, m: Meta) -> None:
-    tmp = d / "meta.json.tmp"
+    # pid-unique tmp: a concurrent writer (ad-hoc script sharing a key with a
+    # settlement run) must never corrupt a promoted file — worst case the
+    # later os.replace wins and the loser's update is lost, which load_meta
+    # tolerates (still self-consistent) and the next run refetches.
+    tmp = d / f"meta.json.{os.getpid()}.tmp"
     tmp.write_text(json.dumps(m.__dict__))
     os.replace(tmp, d / "meta.json")
 
@@ -116,20 +128,21 @@ def read_rows(d: Path, m: Meta, from_block: int, to_block: int) -> list:
     """Cached LogRows in ``[from_block, to_block]`` (must lie inside coverage),
     in (block, fetch) order — parquet preserves row order, so this replays the
     original fetch order exactly."""
-    import pyarrow.compute as pc
     import pyarrow.parquet as pq
 
     from drhs.hypersync import LogRow
+    names = _columns()
     rows: list = []
     for seg in m.segments:
         if seg["to"] < from_block or seg["from"] > to_block:
             continue
-        t = pq.read_table(d / seg["file"], columns=_COLUMNS)
-        if seg["from"] < from_block or seg["to"] > to_block:
-            t = t.filter((pc.field("block_number") >= from_block)
-                         & (pc.field("block_number") <= to_block))
-        cols = [t.column(c).to_pylist() for c in _COLUMNS]
-        rows.extend(LogRow(*vals) for vals in zip(*cols))
+        # filters= prunes row groups before decompression — a partial read of
+        # a big Base segment must not load the whole thing
+        t = pq.read_table(d / seg["file"], columns=names,
+                          filters=[("block_number", ">=", from_block),
+                                   ("block_number", "<=", to_block)])
+        cols = [t.column(c).to_pylist() for c in names]
+        rows.extend(LogRow(**dict(zip(names, vals))) for vals in zip(*cols))
     return rows
 
 
@@ -141,14 +154,9 @@ def append_segment(d: Path, m: Meta | None, meta_args: dict,
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    d.mkdir(parents=True, exist_ok=True)
-    fname = f"seg_{seg_from}_{seg_to}.parquet"
-    table = pa.table({c: [getattr(r, c) for r in rows] for c in _COLUMNS})
-    tmp = d / (fname + ".tmp")
-    pq.write_table(table, tmp, compression="zstd")
-    os.replace(tmp, d / fname)
-
-    seg = {"file": fname, "from": seg_from, "to": seg_to}
+    # validate abutment BEFORE writing anything — a refused segment must not
+    # leave an orphan parquet file behind
+    seg = {"file": f"seg_{seg_from}_{seg_to}.parquet", "from": seg_from, "to": seg_to}
     if m is None:
         m = Meta(cached_from=seg_from, cached_through=seg_to,
                  segments=[seg], **meta_args)
@@ -162,5 +170,11 @@ def append_segment(d: Path, m: Meta | None, meta_args: dict,
         raise RuntimeError(
             f"log cache {d}: segment [{seg_from},{seg_to}] does not abut "
             f"coverage [{m.cached_from},{m.cached_through}]")
+
+    d.mkdir(parents=True, exist_ok=True)
+    table = pa.table({c: [getattr(r, c) for r in rows] for c in _columns()})
+    tmp = d / (seg["file"] + f".{os.getpid()}.tmp")  # pid-unique: see _write_meta
+    pq.write_table(table, tmp, compression="zstd")
+    os.replace(tmp, d / seg["file"])
     _write_meta(d, m)
     return m

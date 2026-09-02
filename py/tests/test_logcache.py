@@ -145,10 +145,89 @@ def test_corrupt_meta_is_refused_and_refetched(tmp_path):
     assert [r.block_number for r in got.rows] == [100]
 
 
-def test_non_abutting_segment_is_refused():
+def test_non_abutting_segment_is_refused_without_orphan_file():
     d = logcache.entry_dir(CHAIN, "deadbeef")
     args = {"chain": CHAIN, "selections": SEL,
             "log_fields": hypersync._DEFAULT_LOG_FIELDS}
     m = logcache.append_segment(d, None, args, [row(100)], 100, 200)
     with pytest.raises(RuntimeError, match="does not abut"):
         logcache.append_segment(d, m, args, [row(300)], 300, 400)  # gap at 201-299
+    assert not (d / "seg_300_400.parquet").exists()  # refused BEFORE writing
+
+
+def test_request_disjoint_above_serves_live_without_extending():
+    live = fake_live({100: [row(100)], 850: [row(850)]}, head=2000)
+    with mock.patch.object(hypersync, "_query_logs_live", live):
+        _q(100, 600)                       # coverage [100,600]
+        got = _q(800, 995)                 # gap above coverage: 601-799 unknown
+    assert live.calls == [(100, 600), (800, 995)]
+    assert [r.block_number for r in got.rows] == [850]
+    m = logcache.load_meta(logcache.entry_dir(
+        CHAIN, logcache.cache_key(CHAIN, SEL, hypersync._DEFAULT_LOG_FIELDS)))
+    assert (m.cached_from, m.cached_through) == (100, 600)  # NOT extended, no crash
+
+
+def test_request_disjoint_below_serves_live_without_gap_fetch():
+    live = fake_live({50: [row(50)], 500: [row(500)]}, head=1000)
+    with mock.patch.object(hypersync, "_query_logs_live", live):
+        _q(400, 600)                       # coverage [400,600]
+        got = _q(40, 80)                   # ends well below coverage
+    assert live.calls == [(400, 600), (40, 80)]  # NOT (40, 399): no surplus
+    assert [r.block_number for r in got.rows] == [50]
+    m = logcache.load_meta(logcache.entry_dir(
+        CHAIN, logcache.cache_key(CHAIN, SEL, hypersync._DEFAULT_LOG_FIELDS)))
+    assert (m.cached_from, m.cached_through) == (400, 600)
+
+
+def test_truncated_backfill_is_not_persisted():
+    live = fake_live({500: [row(500)]}, head=1000)
+    with mock.patch.object(hypersync, "_query_logs_live", live):
+        _q(400, 600)                       # coverage [400,600]
+        # degraded server: archive_height==0 skips the incomplete-range guard
+        broken = fake_live({50: [row(50)], 500: [row(500)]}, head=0)
+        with mock.patch.object(hypersync, "_query_logs_live", broken):
+            got = _q(40, 600)
+    assert [r.block_number for r in got.rows] == [50, 500]  # served (live+cache)
+    m = logcache.load_meta(logcache.entry_dir(
+        CHAIN, logcache.cache_key(CHAIN, SEL, hypersync._DEFAULT_LOG_FIELDS)))
+    assert m.cached_from == 400  # the possibly-partial fetch never became coverage
+
+
+def test_inverted_range_returns_empty_without_fetching():
+    live = fake_live({100: [row(100)]}, head=1000)
+    with mock.patch.object(hypersync, "_query_logs_live", live):
+        _q(100, 600)
+        got = _q(500, 100)                 # to < from: pre-cache instant empty
+    assert live.calls == [(100, 600)]
+    assert got.rows == []
+
+
+def test_persist_failure_degrades_to_live_serving():
+    live = fake_live({100: [row(100)]}, head=1000)
+    with mock.patch.object(hypersync, "_query_logs_live", live), \
+         mock.patch.object(logcache, "append_segment",
+                           side_effect=OSError("disk full")):
+        got = _q(100, 600)                 # write fails; rows already in hand
+    assert [r.block_number for r in got.rows] == [100]
+
+
+def test_enabled_parses_falsy_spellings(monkeypatch):
+    for v, want in [("1", False), ("true", False), ("yes", False),
+                    ("0", True), ("false", True), ("no", True), ("", True)]:
+        monkeypatch.setenv("DRHS_NO_LOG_CACHE", v)
+        assert logcache.enabled() is want, f"DRHS_NO_LOG_CACHE={v!r}"
+    monkeypatch.delenv("DRHS_NO_LOG_CACHE")
+    assert logcache.enabled() is True
+
+
+def test_meta_under_wrong_key_dir_is_refused():
+    live = fake_live({100: [row(100)]}, head=1000)
+    with mock.patch.object(hypersync, "_query_logs_live", live):
+        _q(100, 600)
+    good = logcache.entry_dir(CHAIN, logcache.cache_key(
+        CHAIN, SEL, hypersync._DEFAULT_LOG_FIELDS))
+    import shutil
+    swapped = good.parent / ("0" * 32)     # entry moved under a foreign key
+    shutil.copytree(good, swapped)
+    assert logcache.load_meta(good) is not None
+    assert logcache.load_meta(swapped) is None
