@@ -423,8 +423,9 @@ def test_entrypoint_window_and_precedence_with_4011_reroute():
 
 def test_entrypoint_program_wired_and_provisional_start():
     from run_source import SPECS
-    names = [getattr(p, "name", None) for p in SPECS["susds_eth"].synthetic]
-    assert "oneinch_skybase" in names
+    for src in ("susds_eth", "susdc", "susdc_mar", "susdc_jun"):
+        names = [getattr(p, "name", None) for p in SPECS[src].synthetic]
+        assert "oneinch_skybase" in names, src
     assert ONEINCH_SKYBASE.start == date(2026, 9, 1)     # no settled month re-attributed by default
     assert len(ONEINCH_SKYBASE.entrypoints) == 3
 

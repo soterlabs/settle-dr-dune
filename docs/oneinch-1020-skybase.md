@@ -75,7 +75,10 @@ choose a start date knowingly — moving it is one constant.
 - Other frontends calling 1inch routers as a sub-call (CowSwap settlement 94
   txs, MetaMask swap router 38, …) are correctly **not** 1020 — their own
   programs own them.
-- Phase 1 is sUSDS-eth; sUSDC / L2s are the same registry entry per source.
+- Wired on **sUSDS-eth and every sUSDC source** (eth + base / arbitrum /
+  optimism / unichain): the 1inch routers are deployed at the same address on
+  each chain, so the one `EntrypointProgram` resolves per target. L2 sUSDS via
+  PSM3 (Template C) would need the analogous `tx_to` hook — not done.
 
 ## Impact (full history, measured)
 
