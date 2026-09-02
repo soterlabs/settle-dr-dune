@@ -24,7 +24,7 @@ from datetime import date, datetime, timezone
 import pandas as pd
 
 from .. import events, hypersync
-from ..window import DEFAULT_END  # noqa: F401 — canonical home is drhs/window.py;
+from ..window import DEFAULT_END, midnight_ts  # noqa: F401 — canonical home is drhs/window.py;
 # re-exported here because every runner/template historically imports it from
 # this module.
 
@@ -78,10 +78,82 @@ class SyntheticProgram:
     # Deliveries outside [start, end) are not tagged; None = unbounded.
     start: date | None = None
     end: date | None = None
+    # Anchored programs (multi-tenant routers such as Li.Fi): only deliveries in
+    # these txs count — None = every delivery from ``contracts``. Filled by the
+    # program's resolver at fetch time (see drhs.sources.lifi).
+    txs: frozenset[str] | None = None
 
     def active_at(self, ts: int) -> bool:
         d = datetime.fromtimestamp(ts, tz=timezone.utc).date()
         return (self.start is None or d >= self.start) and (self.end is None or d < self.end)
+
+
+# --- Entrypoint-anchored programs (adding-an-aggregator.md §C) ---------------
+# Aggregators with NO fixed delivery contract: the token reaches the user from a
+# per-solver executor or straight from a pool, so "received FROM a program
+# contract" never fires (1inch on sUSDS-eth: only 435 of 4,025 router txs have
+# a router -> user edge). Only the tx entrypoint (``tx.to``) identifies the
+# program. Resolves per target — from the Transfer rows already fetched with the
+# transaction join, no extra scan — into a SyntheticProgram with ``txs`` set and
+# ``contracts`` EMPTY, which ``synthetic_referrals`` reads as "any incoming
+# transfer (mints included) to a net-positive wallet inside an anchored tx".
+# Known gap: contract-wallet / ERC-4337 users of the frontend have
+# ``tx.to = EntryPoint`` and are invisible to this rule (45 such txs observed).
+@dataclass(frozen=True)
+class EntrypointProgram:
+    name: str
+    ref_code: int
+    entrypoints: frozenset[str]   # router addresses, lower-cased
+    start: date | None = None
+    end: date | None = None
+
+    def resolve_from_rows(self, tr_rows) -> "SyntheticProgram":
+        """Pure core: Transfer rows carrying ``tx_to`` -> the anchored program."""
+        txs = frozenset(r.transaction_hash for r in tr_rows
+                        if r.tx_to in self.entrypoints and r.transaction_hash)
+        return SyntheticProgram(self.name, self.ref_code, frozenset(),
+                                start=self.start, end=self.end, txs=txs)
+
+    def resolve(self, target: "Target", from_block: int, to_block: int, end_ts: int
+                ) -> "SyntheticProgram":
+        """Fetch the target's Transfer rows WITH the transaction join over the
+        program's eligibility window only, and resolve. A separate, bounded
+        query on purpose: joining the pipeline's full Transfer history would
+        re-key its largest cache entries and maintain a second copy forever,
+        for rows the window can never tag."""
+        if self.start is not None:
+            if midnight_ts(self.start) >= end_ts:
+                # window entirely after the scan end (e.g. start = next
+                # settlement): nothing can be tagged — no query at all
+                return self.resolve_from_rows([])
+            from_block = max(from_block, hypersync.block_at_or_genesis(
+                target.blockchain, midnight_ts(self.start)))
+        rows = hypersync.query_logs(
+            target.blockchain,
+            [{"address": [target.address.lower()], "topics": [[events.TRANSFER_TOPIC0]]}],
+            from_block, to_block, with_tx_to=True,
+        ).rows
+        prog = self.resolve_from_rows(rows)
+        _LOG.info("entrypoint[%s] %s: %d Transfer rows in window -> %d anchored txs",
+                  self.name, target.blockchain, len(rows), len(prog.txs))
+        return prog
+
+
+# Skybase's 1inch program: swaps entering through the 1inch AggregationRouter
+# (v4 / v5 / v6 — the entrypoints ops listed, 2026-09-02). PROVISIONAL start =
+# the first unsettled month, so enabling it re-attributes no paid month by
+# default; ops picks the eligibility start from the full-history measurement in
+# docs/oneinch-1020-skybase.md. NB 1inch's own code 4011 (executor Referral,
+# re-routed) keeps precedence in the few txs that carry it (24 of 4,025).
+ONEINCH_SKYBASE = EntrypointProgram(
+    "oneinch_skybase", 1020,
+    frozenset({
+        "0x1111111254fb6c44bac0bed2854e76f90643097d",  # AggregationRouter v4
+        "0x1111111254eeb25477b68fb85ed929f73a960582",  # AggregationRouter v5
+        "0x111111125421ca6dc452d289314280a0f8842a65",  # AggregationRouter v6
+    }),
+    start=date(2026, 9, 1),
+)
 
 
 # CowSwap GPv2Settlement — same address on every chain it is deployed to.
@@ -106,22 +178,45 @@ def synthetic_referrals(
     """
     if not programs:
         return {}
-    by_contract: dict[str, SyntheticProgram] = {}
+    by_contract: dict[str, set[SyntheticProgram]] = {}
+    by_tx: dict[str, set[SyntheticProgram]] = {}    # entrypoint programs: tx -> programs
     for p in programs:
         for a in p.contracts:
-            by_contract[a] = p
+            by_contract.setdefault(a, set()).add(p)
+        if not p.contracts and p.txs is not None:
+            for tx in p.txs:
+                by_tx.setdefault(tx, set()).add(p)
+    all_contracts = set(by_contract)
 
-    # pass 1: deliveries (program contract -> wallet) per tx
+    # pass 1: deliveries per tx — (program contract -> wallet), or for
+    # entrypoint programs ANY incoming transfer (mints included) inside one of
+    # the program's txs; the net-delta guard below still drops forwarders.
     deliveries: dict[str, list[tuple[int, str, SyntheticProgram]]] = {}
     for r in tr_rows:
+        if r.transaction_hash is None:
+            continue
         frm = events.topic_to_addr(r.topic1)
-        p = by_contract.get(frm)
-        if p is None or r.transaction_hash is None or not p.active_at(r.block_time):
-            continue
+        if frm not in by_contract and r.transaction_hash not in by_tx:
+            continue  # nobody's delivery — the common case, skip the rest
         to = events.topic_to_addr(r.topic2)
-        if to == events.ZERO_ADDR or to in by_contract:
+        if to == events.ZERO_ADDR:
             continue
-        deliveries.setdefault(r.transaction_hash, []).append((r.log_index, to, p))
+        # Candidates in `programs` order: a shared contract (or a contract
+        # program and an entrypoint program in one tx) yields one candidate per
+        # program at the same log_index and the LAST program in the tuple wins
+        # (pass 3 uses >=) — the pre-multi-program behaviour. The recipient
+        # skip is per program: a transfer INTO one of p's own contracts is a
+        # hop for p, but another program's contract is an ordinary recipient
+        # (adding the Li.Fi program must not change CowSwap's deliveries).
+        hit_c = by_contract.get(frm, ()); hit_t = by_tx.get(r.transaction_hash, ())
+        for p in programs:
+            if p not in hit_c and p not in hit_t:
+                continue
+            if to in p.contracts or not p.active_at(r.block_time):
+                continue
+            if p.txs is not None and r.transaction_hash not in p.txs:
+                continue  # multi-tenant router: not one of this program's txs
+            deliveries.setdefault(r.transaction_hash, []).append((r.log_index, to, p))
 
     if not deliveries:
         return {}
@@ -156,7 +251,7 @@ def synthetic_referrals(
                 continue  # forwarder (solver/router/hop) — not the final holder
             key = (tx, wallet)
             prev = out.get(key)
-            if prev is None or log_index > prev[0]:
+            if prev is None or log_index >= prev[0]:   # ties: last program wins
                 out[key] = (log_index, p.ref_code)
 
     # Mint-path canary: delivery-based tagging cannot see a solver minting the
@@ -169,7 +264,7 @@ def synthetic_referrals(
     # stays signal: an end user keeping a minted position would clear it.
     _CANARY_DUST_WEI = 10 ** 18  # 1 token; programs are 18-dec sUSDS-scoped
     missed = [(tx, w) for tx, w in mint_rcpts
-              if w not in by_contract and net.get((tx, w), 0) > _CANARY_DUST_WEI
+              if w not in all_contracts and net.get((tx, w), 0) > _CANARY_DUST_WEI
               and (tx, w) not in out]
     if missed:
         _LOG.warning(
@@ -185,9 +280,21 @@ def merge_referrals(
     real: dict[tuple[str, str], tuple[int, int]],
     pseudo: dict[tuple[str, str], tuple[int, int]],
 ) -> dict[tuple[str, str], tuple[int, int]]:
-    """Real Referral events always beat pseudo-referrals for the same (tx, user)."""
+    """Real Referral events always beat pseudo-referrals for the same (tx, user).
+
+    An override is legitimate but worth seeing: for an anchored program it
+    means the router put a partner code on the END USER in a program tx (e.g.
+    Li.Fi's own 4012 via a receiver=user deposit), so the program tag lost.
+    """
     merged = dict(pseudo)
     merged.update(real)
+    overridden = [(k, pseudo[k][1], real[k][1]) for k in pseudo.keys() & real.keys()
+                  if pseudo[k][1] != real[k][1]]
+    if overridden:
+        _LOG.warning(
+            "merge_referrals: %d pseudo-referral tag(s) overridden by a real Referral "
+            "on the same (tx, user) — sample (tx, user, pseudo->real): %s",
+            len(overridden), [(k[0], k[1], f"{a}->{b}") for k, a, b in overridden[:3]])
     return merged
 
 
@@ -216,6 +323,11 @@ def merge_referrals(
 REROUTED_CODES: frozenset[int] = frozenset({
     1004,   # Paraswap (Augustus v5/v6.x, Delta)
     4011,   # 1inch (AggregationRouter v6 / Fusion executors)
+    3006,   # Osero via Jumper Earn (Li.Fi): the deposit adapter 0xe69b860f… (one
+            # address on ethereum/base/arbitrum/optimism) mints with 3006 and hands
+            # the shares to the LiFiDiamond, which delivers them to the user — a
+            # TWO-hop forward, hence the hop-following below. sUSDS-eth + sUSDC L2s.
+            # See docs/osero-codes.md.
 })
 
 
@@ -229,15 +341,39 @@ REROUTED_CODES: frozenset[int] = frozenset({
 # genesis every run, a new router crosses the threshold retroactively.
 MIN_INTERMEDIARY_EVENTS = 3
 
+# Codes whose re-route FOLLOWS net-zero forwarders: owner -> hop -> ... -> user.
+# The default (1004, 4011) is the one-hop rule the settled months were paid
+# under — router -> user directly — and must stay byte-identical. 3006 needs
+# two hops (Jumper's deposit adapter -> LiFiDiamond -> user). Opt-in per code
+# so enabling it for a new partner can never re-attribute a settled month of
+# another.
+REROUTE_FOLLOW_HOPS: frozenset[int] = frozenset({3006})
+
+# Per-code eligibility start for re-routed codes (delivery date >= start).
+# Re-routing replays from genesis, so without this a newly allowlisted code
+# re-attributes every settled month it appears in. Absent = from genesis; the
+# ops decision for 3006 (retroactive, or from a given settlement) is one entry
+# here. Mirrors SyntheticProgram.start / EntrypointProgram.start.
+REROUTE_START: dict[int, date] = {}
+
+# sUSDC sources re-route ONLY 3006 (Jumper Earn deposits land there); 1004 /
+# 4011 have never emitted on sUSDC and enabling them there would expose settled
+# sUSDC months to a future forwarder with no measurement behind it.
+SUSDC_REROUTED: frozenset[int] = frozenset({3006})
+
 
 def rerouted_referrals(
     ref_rows, tr_rows, codes: frozenset[int],
     min_owner_events: int = MIN_INTERMEDIARY_EVENTS,
+    follow_hops: frozenset[int] = REROUTE_FOLLOW_HOPS,
+    start_by_code: dict[int, date] = REROUTE_START,
 ) -> dict[tuple[str, str], tuple[int, int]]:
     """Re-route intermediary-owned referral codes to the end recipients.
 
     Returns {(tx, wallet): (log_index, code)} in the shape of
-    ``latest_referral_from_events``. Later deliveries win within a tx.
+    ``latest_referral_from_events``. Later deliveries win within a tx. Codes in
+    ``follow_hops`` chase net-zero forwarders transitively; all others use the
+    direct owner -> recipient edge only.
     """
     if not codes:
         return {}
@@ -254,6 +390,9 @@ def rerouted_referrals(
         code = events.referral_code_from_topic(r.topic1)
         if code not in codes or r.transaction_hash is None:
             continue
+        st = start_by_code.get(code)
+        if st is not None and datetime.fromtimestamp(r.block_time, tz=timezone.utc).date() < st:
+            continue  # before the code's eligibility start — not re-routed
         owner = events.topic_to_addr(r.topic2)
         if owner_events.get(owner, 0) < min_owner_events:
             continue  # likely an end user owning the code, not a router
@@ -264,13 +403,12 @@ def rerouted_referrals(
     if not owner_code:
         return {}
 
-    # 2. net deltas + deliveries out of the referral owners, over those txs
+    # 2. net deltas + the outgoing-transfer graph, over those txs
     net: dict[tuple[str, str], int] = {}
-    deliveries: dict[str, list[tuple[int, str, str]]] = {}   # tx -> [(li, from_owner, to)]
+    outgoing: dict[str, dict[str, list[tuple[int, str]]]] = {}   # tx -> from -> [(li, to)]
     for r in tr_rows:
         tx = r.transaction_hash
-        owners = owner_code.get(tx)
-        if owners is None:
+        if tx not in owner_code:
             continue
         amt = events.transfer_value(r.data)
         frm = events.topic_to_addr(r.topic1)
@@ -279,23 +417,50 @@ def rerouted_referrals(
             net[(tx, to)] = net.get((tx, to), 0) + amt
         if frm != events.ZERO_ADDR:
             net[(tx, frm)] = net.get((tx, frm), 0) - amt
-        if frm in owners and to != events.ZERO_ADDR:
-            deliveries.setdefault(tx, []).append((r.log_index, frm, to))
+            if to != events.ZERO_ADDR:
+                outgoing.setdefault(tx, {}).setdefault(frm, []).append((r.log_index, to))
 
-    # 3. re-route forwarder-owned codes to net-positive delivery recipients
+    # 3. re-route forwarder-owned codes to net-positive delivery recipients.
+    #    Direct rule (default): recipients of transfers FROM the owner; a
+    #    recipient that is itself a forwarder (net <= 0) is a hop and is NOT
+    #    tagged. For codes in ``follow_hops`` the hop is followed instead —
+    #    its own outgoing transfers are walked until net-positive END
+    #    recipients are reached (Jumper 3006: adapter -> LiFiDiamond -> user).
+    #    The tag's log_index is the final delivery edge's.
     out: dict[tuple[str, str], tuple[int, int]] = {}
-    for tx, rows in deliveries.items():
-        owners = owner_code[tx]
-        for log_index, owner, wallet in rows:
+    for tx, owners in owner_code.items():
+        edges = outgoing.get(tx)
+        if not edges:
+            continue
+        for owner, (_li, code) in owners.items():
             if net.get((tx, owner), 0) > 0:
                 continue  # owner retains (partner vault) — keep its attribution
-            if wallet in owners or net.get((tx, wallet), 0) <= 0:
-                continue  # hop to another intermediary / forwarder
-            code = owners[owner][1]
-            key = (tx, wallet)
-            prev = out.get(key)
-            if prev is None or log_index > prev[0]:
-                out[key] = (log_index, code)
+            chase = code in follow_hops
+            # best_since[hop] = the EARLIEST log_index at which the hop was
+            # funded along any path: a hop's onward transfers count only if
+            # they come after it received the shares — on a shared router (the
+            # LiFiDiamond) an unrelated earlier delivery out of the same hop
+            # must not inherit the code. A hop reached again via an earlier
+            # funding edge is re-expanded with the smaller bound, so the result
+            # cannot depend on Transfer-row order.
+            best_since: dict[str, int] = {owner: -1}
+            frontier: list[tuple[str, int]] = [(owner, -1)]
+            while frontier:
+                nxt: list[tuple[str, int]] = []
+                for hop, since in frontier:
+                    for log_index, wallet in edges.get(hop, ()):
+                        if log_index <= since or wallet in owners:
+                            continue  # before the hop was funded / another owner
+                        if net.get((tx, wallet), 0) <= 0:
+                            if chase and log_index < best_since.get(wallet, 1 << 62):
+                                best_since[wallet] = log_index
+                                nxt.append((wallet, log_index))   # forwarder hop — keep following
+                            continue
+                        key = (tx, wallet)
+                        prev = out.get(key)
+                        if prev is None or log_index > prev[0]:
+                            out[key] = (log_index, code)
+                frontier = nxt
     return out
 
 
@@ -368,21 +533,28 @@ def build_legs(
     return legs
 
 
+def target_block_range(t: Target, end_ts: int) -> tuple[int, int]:
+    """[from_block, to_block] of ``t``'s scan window. start_date (hardcoded
+    2024-09-01) can precede an L2's genesis (e.g. unichain): scan from genesis
+    — matches Dune, which simply finds no events before the chain existed."""
+    from_block = hypersync.block_at_or_genesis(t.blockchain, midnight_ts(t.start_date))
+    return from_block, hypersync.find_block_at_or_before(t.blockchain, end_ts - 1)
+
+
 def fetch_target_rows(t: Target, end_ts: int):
     """Fetch the raw Referral + Transfer ``LogRow``s for ``t`` over the scan
     window. Split from the pure leg logic so fixtures can capture these rows
     and tests can replay ``legs_from_rows`` offline."""
+    ref_rows, tr_rows, _fb, _tb = fetch_target_rows_ranged(t, end_ts)
+    return ref_rows, tr_rows
+
+
+def fetch_target_rows_ranged(t: Target, end_ts: int):
+    """``fetch_target_rows`` plus the [from_block, to_block] it scanned, so the
+    custody / anchored-program fetches of the same target use the SAME window
+    (a second block resolution could land on a different head)."""
     addr = t.address.lower()
-    start_ts = int(datetime(t.start_date.year, t.start_date.month, t.start_date.day,
-                            tzinfo=timezone.utc).timestamp())
-    try:
-        from_block = hypersync.find_block_at_or_before(t.blockchain, start_ts)
-    except hypersync.HyperSyncError:
-        # start_date (hardcoded 2024-09-01) can precede an L2's genesis
-        # (e.g. unichain). Scan from genesis — matches Dune, which simply finds
-        # no events before the chain existed.
-        from_block = 0
-    to_block = hypersync.find_block_at_or_before(t.blockchain, end_ts - 1)
+    from_block, to_block = target_block_range(t, end_ts)
     ref_rows = hypersync.query_logs(
         t.blockchain, [{"address": [addr], "topics": [[events.REFERRAL_TOPIC0]]}],
         from_block, to_block,
@@ -391,7 +563,7 @@ def fetch_target_rows(t: Target, end_ts: int):
         t.blockchain, [{"address": [addr], "topics": [[events.TRANSFER_TOPIC0]]}],
         from_block, to_block,
     ).rows
-    return ref_rows, tr_rows
+    return ref_rows, tr_rows, from_block, to_block
 
 
 def latest_referral_from_events(ref_rows) -> dict[tuple[str, str], tuple[int, int]]:
@@ -509,22 +681,24 @@ def legs_from_rows(
 
 def _legs_for_target(
     t: Target, end_ts: int,
-    synthetic: tuple[SyntheticProgram, ...] = (),
+    synthetic: tuple = (),
     reroute: frozenset[int] = frozenset(),
     custody: tuple = (),
 ) -> pd.DataFrame:
-    ref_rows, tr_rows = fetch_target_rows(t, end_ts)
+    ref_rows, tr_rows, from_block, to_block = fetch_target_rows_ranged(t, end_ts)
+    # anchored programs (lifi.IntegratorProgram, EntrypointProgram) resolve per
+    # target — each fetches its own bounded anchor data — into a concrete
+    # SyntheticProgram (tx set + delivery contracts).
+    unresolved = [p for p in synthetic if not isinstance(p, SyntheticProgram)]
     custody_rows = []
     if custody:
         from . import custody as custody_mod
-        from_block = hypersync.find_block_at_or_before(
-            t.blockchain,
-            int(datetime(t.start_date.year, t.start_date.month, t.start_date.day,
-                         tzinfo=timezone.utc).timestamp()))
-        to_block = hypersync.find_block_at_or_before(t.blockchain, end_ts - 1)
         for p in custody:
             if p.blockchain == t.blockchain and p.token == t.address.lower():
                 custody_rows.append((p, custody_mod.fetch_position_rows(p, from_block, to_block)))
+    if unresolved:
+        synthetic = tuple(p if isinstance(p, SyntheticProgram)
+                          else p.resolve(t, from_block, to_block, end_ts) for p in synthetic)
     return legs_from_rows(t, ref_rows, tr_rows, end_ts, synthetic, reroute, custody_rows)
 
 

@@ -66,6 +66,9 @@ class LogRow:
     topic3: str | None
     data: str
     transaction_hash: str | None = None
+    # The tx's ``to`` (entrypoint), lower-cased — only when the query asked for
+    # the transaction join (``with_tx_to=True``); None otherwise / in fixtures.
+    tx_to: str | None = None
 
 
 @dataclass
@@ -146,6 +149,7 @@ def query_logs(
     *,
     log_fields: list[str] | None = None,
     block_fields: list[str] | None = None,
+    with_tx_to: bool = False,
     post: Callable[..., Any] = requests.post,
     use_cache: bool | None = None,
 ) -> QueryResult:
@@ -173,6 +177,9 @@ def query_logs(
     keep it that way or probe explicitly. Cache writes are best-effort: a
     failed persist (disk full, etc.) logs a warning and the query still
     returns its rows.
+
+    ``with_tx_to`` joins each log's transaction and fills ``LogRow.tx_to`` (the
+    tx entrypoint) — same scan, a little more payload.
     """
     from drhs import logcache
 
@@ -182,14 +189,15 @@ def query_logs(
     if not use_cache:
         return _query_logs_live(chain, selections, from_block, to_block,
                                 log_fields=log_fields, block_fields=block_fields,
-                                post=post)
+                                with_tx_to=with_tx_to, post=post)
     if to_block < from_block:
         return QueryResult()  # degenerate range: empty, like the live path
 
-    key = logcache.cache_key(chain, selections, lf)
+    key = logcache.cache_key(chain, selections, lf, with_tx_to)
     d = logcache.entry_dir(chain, key)
     meta = logcache.load_meta(d)
-    meta_args = {"chain": chain, "selections": selections, "log_fields": lf}
+    meta_args = {"chain": chain, "selections": selections, "log_fields": lf,
+                 "with_tx_to": with_tx_to}
     depth = logcache.SAFE_DEPTH_BLOCKS.get(chain, logcache._DEFAULT_SAFE_DEPTH)
     result = QueryResult()
 
@@ -205,7 +213,8 @@ def query_logs(
     if meta is not None and from_block < meta.cached_from:
         low_to = meta.cached_from - 1 if to_block >= meta.cached_from - 1 else to_block
         low = _query_logs_live(chain, selections, from_block, low_to,
-                               log_fields=log_fields, block_fields=block_fields)
+                               log_fields=log_fields, block_fields=block_fields,
+                               with_tx_to=with_tx_to)
         result.archive_height = low.archive_height
         new_meta = None
         if low.archive_height > 0 and low_to == meta.cached_from - 1:
@@ -225,7 +234,8 @@ def query_logs(
     if to_block > cov_hi:
         live_from = max(from_block, cov_hi + 1)
         live = _query_logs_live(chain, selections, live_from, to_block,
-                                log_fields=log_fields, block_fields=block_fields)
+                                log_fields=log_fields, block_fields=block_fields,
+                                with_tx_to=with_tx_to)
         result.rows.extend(live.rows)
         result.archive_height = max(result.archive_height, live.archive_height)
         # Persist only blocks a safe depth below the head observed by THIS
@@ -267,6 +277,7 @@ def _query_logs_live(
     *,
     log_fields: list[str] | None = None,
     block_fields: list[str] | None = None,
+    with_tx_to: bool = False,
     post: Callable[..., Any] = requests.post,
 ) -> QueryResult:
     """The raw network fetch — pages followed via ``next_block`` until
@@ -274,7 +285,10 @@ def _query_logs_live(
     lf = log_fields or _DEFAULT_LOG_FIELDS
     bf = block_fields or _DEFAULT_BLOCK_FIELDS
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {_token()}"}
-    base = {"logs": selections, "field_selection": {"log": lf, "block": bf}}
+    fs: dict[str, Any] = {"log": lf, "block": bf}
+    if with_tx_to:
+        fs["transaction"] = ["hash", "to"]
+    base = {"logs": selections, "field_selection": fs}
     result = QueryResult()
     cursor = from_block
     end_exclusive = to_block + 1  # HyperSync to_block is exclusive
@@ -291,6 +305,10 @@ def _query_logs_live(
                 to_int(b["number"]): to_int(b["timestamp"])
                 for b in (group.get("blocks") or [])
             }
+            to_by_tx = {
+                _lower(tx.get("hash")): _lower(tx.get("to"))
+                for tx in (group.get("transactions") or [])
+            } if with_tx_to else {}
             for lg in group.get("logs") or []:
                 bn = to_int(lg["block_number"])
                 ts = ts_by_block.get(bn)
@@ -298,6 +316,15 @@ def _query_logs_live(
                     raise HyperSyncError(
                         f"HyperSync {chain} response has a log at block {bn} "
                         f"with no matching block timestamp — refusing to misdate."
+                    )
+                if with_tx_to and _lower(lg.get("transaction_hash")) not in to_by_tx:
+                    # same contract as the timestamp join: complete or raising,
+                    # never a silent None that would be persisted under the
+                    # join key and resolve an entrypoint program to nothing.
+                    raise HyperSyncError(
+                        f"HyperSync {chain} response has a log in tx "
+                        f"{lg.get('transaction_hash')} with no matching transaction "
+                        f"— tx join incomplete, refusing to persist tx_to=None."
                     )
                 result.rows.append(
                     LogRow(
@@ -311,6 +338,7 @@ def _query_logs_live(
                         topic3=_lower(lg.get("topic3")),
                         data=lg.get("data") or "0x",
                         transaction_hash=_lower(lg.get("transaction_hash")),
+                        tx_to=to_by_tx.get(_lower(lg.get("transaction_hash"))) if with_tx_to else None,
                     )
                 )
         nxt = page.get("next_block")
@@ -426,6 +454,19 @@ def find_block_at_or_before(chain: str, target_ts: int) -> int:
             high = mid - 1
     _cache_put(ck, low)
     return low
+
+
+def block_at_or_genesis(chain: str, target_ts: int) -> int:
+    """``find_block_at_or_before``, or 0 when ``target_ts`` precedes the chain's
+    genesis (a 2024-09-01 start on a younger L2 scans from block 0, as Dune
+    would). Every OTHER failure — transport, auth, head not returnable —
+    propagates: a swallowed 5xx must never turn into a silent full-chain scan."""
+    try:
+        return find_block_at_or_before(chain, target_ts)
+    except HyperSyncError as exc:
+        if "precedes genesis" in str(exc):
+            return 0
+        raise
 
 
 # /query is a read-only, idempotent POST — transient upstream failures (LB
