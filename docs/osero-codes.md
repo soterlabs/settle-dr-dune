@@ -81,30 +81,36 @@ Known, accepted gaps: the two single-event owners above sit below
 `MIN_INTERMEDIARY_EVENTS = 3` and are not re-routed (2 deposits). If either
 address recurs it crosses the threshold retroactively on the next run.
 
-### Impact (measured)
+### Impact (measured — full pipeline regeneration)
 
-Method as for CowSwap 1003: the source is built with and without the re-route
-for the affected wallets only (65 re-routed tags → 50 wallets: 6 sUSDS-eth,
-17 base / 16 arbitrum / 11 optimism sUSDC), full wallet history, through the
-production revenue stack (`pipeline.source_monthly("susds_susdc")`). Only
-these wallets' TWA can change, so the diff is exact.
-`hypersync-results/measurements/reroute_3006_delta.csv`.
+Authoritative figure: the **full chunked pipeline re-run on this branch**
+(2026-09-02, warm log cache, 29 chunks) diffed row-by-row against the committed
+August outputs — `hypersync-results/measurements/aug_regen_diff.csv`. 23 of
+2,372 rows changed, all in the `susds_susdc` family; every other chunk (PSM3
+incl. the 8 base shards, sp\*, farms, stUSDS, class-D holders) is byte-identical.
+Net delta across all codes = **$0.000000000**.
 
 | month | 3006 (USD) | from |
 |---|---|---|
-| 2026-06 | 0.00 | — |
-| 2026-07 | **2.25** | 99 untagged (sUSDS-eth) |
-| 2026-08 | **2.94** | 99 untagged (sUSDS-eth) |
-| total | **5.20** | net delta across all codes = **$0.00** |
+| 2026-07 | **0.7712** | 99 untagged (sUSDS-eth) |
+| 2026-08 | **0.6568** | 99 untagged (sUSDS-eth) |
+| total | **1.4282** | + $0.0002 on sUSDC L2s from 127/128/1017 |
 
-Practically all of it is the **6 ethereum sUSDS wallets** (`jumper.exchange`
-same-chain swaps). The 44 sUSDC-L2 wallets (`jumper.exchange.earn`) contribute
-≈ $0.0002 in total despite 58 deposits — they are **round trips**: e.g. the
-largest, 1,899.94 sUSDC on base (`0xce62ffd4…`, 2026-07-16 19:55), was
-redeemed at 19:56. A one-minute holding earns nothing under a time-weighted
-balance, which is the intended behaviour; the code is attributed correctly
-for whatever is held. Displaced codes: 99 −$5.195, 127 −$0.0002, 128 / 1017
-< $0.00001.
+Why lower than a standalone estimate: the largest 3006 wallet
+(`0x7fb4991e…`, 16.7k sUSDS mid-July) took a **CowSwap delivery on
+2026-07-21**, and under last-referral-wins its whole balance is 1003 from
+07-22 on. A with/without measurement that runs the 3006 re-route *without*
+the CowSwap program keeps that wallet on 3006 and reports $5.20 — the
+number an earlier draft of this note carried. The re-route itself is
+identical in both (7 tags, 6 wallets); only the competing program differs.
+Lesson recorded in `adding-an-aggregator.md`: measure with the production
+program set, or better, diff a full regeneration.
+
+The 44 sUSDC-L2 wallets (`jumper.exchange.earn`) contribute ≈ $0.0002 in
+total despite 58 deposits — they are **round trips**: the largest, 1,899.94
+sUSDC on base (`0xce62ffd4…`, 2026-07-16 19:55), was redeemed at 19:56. A
+one-minute holding earns nothing under a time-weighted balance; the code is
+attributed correctly for whatever is held.
 
 ## Open items for ops
 

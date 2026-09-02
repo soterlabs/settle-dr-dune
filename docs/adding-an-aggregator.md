@@ -88,7 +88,13 @@ This is a registry entry — no new code:
    with/without the program restricted to affected wallets (the diff is exact
    because nobody else's TWA can change) and report the per-code deltas —
    see the "Implemented + measured" section of the CowSwap doc for the
-   template. This is what ops signs off on (requirement 4).
+   template. This is what ops signs off on (requirement 4). **Run the
+   "with" side with the full production program set** (CowSwap, every
+   re-routed code, the other anchored programs): a later signal from another
+   program ends your tag, and a measurement that omits it overstates the
+   program (Osero 3006: $5.20 standalone vs $1.43 in the pipeline — one
+   wallet later bought via CowSwap). The authoritative check is a full
+   regeneration diffed against the committed outputs.
 
 ### B. Referral-emitting aggregator (the Paraswap / 1inch shape) — IMPLEMENTED
 
