@@ -456,6 +456,19 @@ def find_block_at_or_before(chain: str, target_ts: int) -> int:
     return low
 
 
+def block_at_or_genesis(chain: str, target_ts: int) -> int:
+    """``find_block_at_or_before``, or 0 when ``target_ts`` precedes the chain's
+    genesis (a 2024-09-01 start on a younger L2 scans from block 0, as Dune
+    would). Every OTHER failure — transport, auth, head not returnable —
+    propagates: a swallowed 5xx must never turn into a silent full-chain scan."""
+    try:
+        return find_block_at_or_before(chain, target_ts)
+    except HyperSyncError as exc:
+        if "precedes genesis" in str(exc):
+            return 0
+        raise
+
+
 # /query is a read-only, idempotent POST — transient upstream failures (LB
 # resets, 5xx, 429) are retried with exponential backoff instead of killing a
 # multi-minute chunk at its last fetch.

@@ -45,6 +45,18 @@ _LOG = logging.getLogger(__name__)
 LIFI_DIAMOND = "0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae"
 # Li.Fi Executor (destination-side swap + delivery) — likewise one address.
 LIFI_EXECUTOR = "0xd9b2da9c45b118e4e93a004fb1452bcdb6cc0e88"
+# Additional VERIFIED Li.Fi destination contracts allowed to emit the
+# LiFiTransferCompleted that anchors a cross-chain delivery (Receiver variants
+# per chain/version). The emitter set is an allowlist on purpose: the
+# transactionId is public on the origin chain, so trusting ANY emitter would let
+# an arbitrary contract anchor its own tx and pseudo-tag wallets. A completion
+# from an unknown emitter is logged (WARNING) and ignored — add the address
+# here after verifying it on-chain.
+LIFI_RECEIVERS: frozenset[str] = frozenset()
+# Origin-chain scans start this much before the eligibility start: a bridge is
+# not atomic, and one started just before the start and delivered inside the
+# window must still be joined (the destination scan + active_at gate the tag).
+ORIGIN_LEAD_SECONDS = 2 * 86400
 
 # LiFiGenericSwapCompleted(bytes32 indexed transactionId, string integrator,
 #   string referrer, address receiver, address fromAssetId, address toAssetId,
@@ -64,7 +76,7 @@ ASSET_SWAPPED_TOPIC0 = "0x7bfdfdb5e3a3776976e53cb0607060f54c5312701c8cba1155cc4d
 # EVM chain ids for the chains the pipeline scans (BridgeData.destinationChainId).
 CHAIN_ID: dict[str, int] = {
     "ethereum": 1, "optimism": 10, "base": 8453, "arbitrum": 42161,
-    "unichain": 130, "avalanche_c": 43114,
+    "unichain": 130, "avalanche_c": 43114, "plume": 98866, "monad": 143,
 }
 
 
@@ -176,27 +188,41 @@ def anchored_deliveries(
     on the target chain. Cross-chain join is on ``transactionId``.
     """
     txs: set[str] = set()
-    contracts: set[str] = {LIFI_DIAMOND, LIFI_EXECUTOR}
+    allowed = {LIFI_DIAMOND, LIFI_EXECUTOR} | set(LIFI_RECEIVERS)
     for r in generic_rows:
-        if r.transaction_hash and program.matches(decode_generic_swap(r).integrator):
+        if r.address == LIFI_DIAMOND and r.transaction_hash \
+                and program.matches(decode_generic_swap(r).integrator):
             txs.add(r.transaction_hash)
-            contracts.add(r.address)
     want = CHAIN_ID[target_chain]
     ids: set[str] = set()
     for r in started_rows:
+        if r.address != LIFI_DIAMOND:
+            continue
         d = decode_transfer_started(r)
         if program.matches(d.integrator) and d.destination_chain_id == want:
             ids.add(d.transaction_id)
     if ids:
+        by_id: dict[str, set[str]] = {}
         for r in completed_rows:
-            if r.transaction_hash and (r.topic1 or "").lower() in ids:
-                txs.add(r.transaction_hash)
-                contracts.add(r.address)
+            tid = (r.topic1 or "").lower()
+            if not r.transaction_hash or tid not in ids:
+                continue
+            if r.address not in allowed:
+                _LOG.warning("lifi[%s]: LiFiTransferCompleted for our id %s from UNKNOWN emitter %s "
+                             "in tx %s — ignored (add to LIFI_RECEIVERS after verifying).",
+                             program.name, tid[:12], r.address, r.transaction_hash)
+                continue
+            txs.add(r.transaction_hash); by_id.setdefault(tid, set()).add(r.transaction_hash)
         for r in swapped_rows:
-            if r.transaction_hash and asset_swapped_transaction_id(r) in ids:
-                txs.add(r.transaction_hash)
-                contracts.add(r.address)
-    return frozenset(txs), frozenset(contracts)
+            if r.address == LIFI_EXECUTOR and r.transaction_hash \
+                    and asset_swapped_transaction_id(r) in ids:
+                tid = asset_swapped_transaction_id(r)
+                txs.add(r.transaction_hash); by_id.setdefault(tid, set()).add(r.transaction_hash)
+        dup = {k: v for k, v in by_id.items() if len(v) > 1}
+        if dup:
+            _LOG.warning("lifi[%s]: %d transactionId(s) anchor more than one destination tx: %s",
+                         program.name, len(dup), [(k[:12], sorted(v)) for k, v in list(dup.items())[:3]])
+    return frozenset(txs), frozenset(allowed)
 
 
 # --- Fetch ------------------------------------------------------------------------
@@ -219,13 +245,8 @@ def _scan(chain: str, selections: list[dict], from_block: int, to_block: int,
 
 
 def _blocks_for(chain: str, start_ts: int, end_ts: int) -> tuple[int, int]:
-    try:
-        fb = hypersync.find_block_at_or_before(chain, start_ts)
-    except hypersync.HyperSyncError as exc:
-        if "precedes genesis" not in str(exc):
-            raise   # transport / auth failure: never silently scan from block 0
-        fb = 0      # start precedes the chain's genesis
-    return fb, hypersync.find_block_at_or_before(chain, end_ts - 1)
+    return (hypersync.block_at_or_genesis(chain, start_ts),
+            hypersync.find_block_at_or_before(chain, end_ts - 1))
 
 
 def resolve(program: IntegratorProgram, target, from_block: int, to_block: int, end_ts: int):
@@ -237,8 +258,12 @@ def resolve(program: IntegratorProgram, target, from_block: int, to_block: int, 
     chain = target.blockchain
     start_ts = midnight_ts(target.start_date)
     if program.start is not None:
+        if midnight_ts(program.start) >= end_ts:
+            return SyntheticProgram(program.name, program.ref_code,
+                                    frozenset({LIFI_DIAMOND, LIFI_EXECUTOR} | set(LIFI_RECEIVERS)),
+                                    start=program.start, end=program.end, txs=frozenset())
         start_ts = max(start_ts, midnight_ts(program.start))
-        from_block = max(from_block, hypersync.find_block_at_or_before(chain, start_ts))
+        from_block = max(from_block, hypersync.block_at_or_genesis(chain, start_ts))
 
     def _gen(r):
         try:
@@ -259,7 +284,7 @@ def resolve(program: IntegratorProgram, target, from_block: int, to_block: int, 
     for oc in program.origin_chains:
         if oc == chain or oc not in hypersync.HYPERSYNC_HOSTS:
             continue
-        ofb, otb = _blocks_for(oc, start_ts, end_ts)
+        ofb, otb = _blocks_for(oc, start_ts - ORIGIN_LEAD_SECONDS, end_ts)
         started += _scan(oc, [{"address": [LIFI_DIAMOND], "topics": [[TRANSFER_STARTED_TOPIC0]]}],
                          ofb, otb, _started)
     ids = {decode_transfer_started(r).transaction_id for r in started}
@@ -268,9 +293,9 @@ def resolve(program: IntegratorProgram, target, from_block: int, to_block: int, 
     if ids:
         # Both destination events are scanned by topic0 only and matched to the
         # id set client-side: embedding the (growing) id list in the selection
-        # would give the query a new cache key every month. LiFiTransferCompleted
-        # may come from any emitter (Executor / Receiver variants); AssetSwapped
-        # from the Executor.
+        # would give the query a new cache key every month. Emitters are checked
+        # against the allowlist in anchored_deliveries (unknown ones are logged,
+        # never trusted).
         completed = _scan(chain, [{"topics": [[TRANSFER_COMPLETED_TOPIC0]]}], from_block, to_block,
                           lambda r: (r.topic1 or "").lower() in ids)
         swapped = _scan(chain, [{"address": [LIFI_EXECUTOR], "topics": [[ASSET_SWAPPED_TOPIC0]]}],

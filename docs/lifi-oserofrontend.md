@@ -48,8 +48,21 @@ resolves per target at fetch time (`template_ab._legs_for_target`) into a plain
 3. on the target chain, `LiFiTransferCompleted` with `topic1 ∈ ids`
    (server-side filter, any emitter) plus the Executor's `AssetSwapped` with a
    matching id → destination txs;
-4. delivery contracts = Diamond + Executor + every Li.Fi contract that emitted
-   in an anchored tx (Receiver variants).
+4. delivery contracts = Diamond + Executor + the **verified** Receiver
+   allowlist `LIFI_RECEIVERS` (empty today). Emitters are never learned from
+   the chain: the `transactionId` is public on the origin chain, so a
+   completion from an arbitrary contract must not anchor its own tx — such
+   completions are logged (`UNKNOWN emitter`) and ignored; add the address to
+   the allowlist after verifying it. Generic-swap and started rows are
+   likewise accepted from the Diamond only. An id anchoring more than one
+   destination tx is logged.
+
+Origin chains are scanned from `start − 2 days` (`ORIGIN_LEAD_SECONDS`): a
+bridge is not atomic, and one started just before the eligibility start and
+delivered inside the window must still be joined (the destination scan and
+`active_at` gate the tag). The coverage guard (`run_dr_chunk.scan_chains`)
+includes the origin chains, so a lagging origin archive fails the run instead
+of silently under-anchoring month-end bridges.
 
 `synthetic_referrals` then applies the unchanged rules — received the token
 FROM a program contract, net-positive across the tx, inside the eligibility

@@ -484,3 +484,61 @@ def test_entrypoint_resolve_skips_query_when_window_is_after_scan_end(monkeypatc
     prog = EntrypointProgram("t", 1020, ONEINCH_SKYBASE.entrypoints, start=date(2026, 9, 1))
     end_ts_aug = 1_788_220_800   # 2026-09-01 00:00 UTC == the August scan end
     assert prog.resolve(SUSDS, 0, 9_000, end_ts_aug).txs == frozenset()
+
+
+# --- second review: BFS re-entry, candidate order, per-program skip, REROUTE_START --
+
+def test_hop_following_two_funding_paths_is_order_independent():
+    """J funds L via two hops (H1 late, H2 early); L delivers to A between the
+    two fundings and to D after both. Both are 3006 whichever row order the
+    transfers arrive in (the hop is re-expanded with the earliest funding edge)."""
+    H1, H2 = R, "0x9999999999999999999999999999999999999999"
+    rows = [_tr("0xt", 1, "0x" + "0" * 40, J, 20.0),
+            _tr("0xt", 3, J, H1, 10.0), _tr("0xt", 4, J, H2, 10.0),
+            _tr("0xt", 5, H2, L, 10.0), _tr("0xt", 6, L, A, 10.0),
+            _tr("0xt", 8, H1, L, 10.0), _tr("0xt", 9, L, D, 10.0)]
+    rf = [_ref("0xt", 2, J, 3006)] + _warm(J, 3006)
+    fwd = rerouted_referrals(rf, rows, REROUTED_CODES)
+    rev = rerouted_referrals(rf, list(reversed(rows)), REROUTED_CODES)
+    assert fwd == rev == {("0xt", A): (6, 3006), ("0xt", D): (9, 3006)}
+
+
+def test_tie_between_contract_and_entrypoint_program_follows_tuple_order():
+    cow = template_ab.COWSWAP
+    rows = [_tr_to("0xr", 1, S, A, 10.0, V6)]            # CowSwap delivery inside a 1inch-router tx
+    one = ONEINCH_OPEN.resolve_from_rows(rows)
+    assert synthetic_referrals(rows, (cow, one)) == {("0xr", A): (1, 1020)}
+    assert synthetic_referrals(rows, (one, cow)) == {("0xr", A): (1, 1003)}
+
+
+def test_recipient_skip_is_per_program():
+    """A CowSwap delivery TO a Li.Fi contract is still a CowSwap delivery:
+    adding the Li.Fi program must not change 1003's tags."""
+    lifi_prog = SyntheticProgram("lifi", 3900, frozenset({L}), txs=frozenset({"0xother"}))
+    rows = [_tr("0xt", 1, S, L, 5.0)]
+    assert synthetic_referrals(rows, (COWSWAP,)) == {("0xt", L): (1, 1003)}
+    assert synthetic_referrals(rows, (COWSWAP, lifi_prog)) == {("0xt", L): (1, 1003)}
+    # ...while a transfer into one of the program's OWN contracts is a hop for it
+    assert synthetic_referrals([_tr("0xt", 1, S, S, 5.0)], (COWSWAP,)) == {}
+
+
+def test_reroute_start_gates_by_delivery_date():
+    tr, rf = _jumper_tx("0xt1", A, 100.0)                     # DAY = 2025-01-01
+    rf = rf + _warm(J, 3006)
+    assert rerouted_referrals(rf, tr, REROUTED_CODES, start_by_code={3006: date(2025, 1, 2)}) == {}
+    assert rerouted_referrals(rf, tr, REROUTED_CODES, start_by_code={3006: date(2025, 1, 1)}) == {("0xt1", A): (4, 3006)}
+    assert template_ab.REROUTE_START == {}                     # from genesis until ops decides
+
+
+def test_susdc_reroute_is_3006_only():
+    from run_source import SPECS
+    for src in ("susdc", "susdc_mar", "susdc_jun"):
+        assert SPECS[src].reroute == frozenset({3006}), src
+    assert 1004 in SPECS["susds_eth"].reroute and 4011 in SPECS["susds_eth"].reroute
+
+
+def test_scan_chains_includes_lifi_origin_chains():
+    import run_dr_chunk
+    chains = run_dr_chunk.scan_chains(["susds_eth_ethereum_sUSDS"])
+    assert {"ethereum", "base", "arbitrum", "optimism", "unichain", "avalanche_c"} <= chains
+    assert run_dr_chunk.scan_chains(["stusds_ethereum_stUSDS"]) == {"ethereum"}

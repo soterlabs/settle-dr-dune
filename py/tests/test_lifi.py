@@ -166,10 +166,13 @@ def test_anchor_cross_chain_joins_on_transaction_id():
     # and a bridge to a different destination anchors only on THAT chain
     txs3, _ = lifi.anchored_deliveries(P, "arbitrum", [], started[:1], completed, [])
     assert txs3 == frozenset()
-    # a receiver variant emitting the completion joins the delivery-contract set
+    # a completion from an UNKNOWN emitter never anchors (spoofable: the id is
+    # public on the origin chain) — it is logged and the delivery set stays the
+    # verified allowlist
     rcv = "0x4dac9d1769b9b304cb04741dcdeb2fc14abdf110"
-    _, contracts3 = lifi.anchored_deliveries(P, "ethereum", [], started[:1], [_completed("0xd", emitter=rcv)], [])
-    assert rcv in contracts3
+    txs3, contracts3 = lifi.anchored_deliveries(P, "ethereum", [], started[:1], [_completed("0xd", emitter=rcv)], [])
+    assert txs3 == frozenset() and rcv not in contracts3
+    assert contracts3 == {lifi.LIFI_DIAMOND, lifi.LIFI_EXECUTOR} | set(lifi.LIFI_RECEIVERS)
 
 
 def test_asset_swapped_fallback_anchors_too():
@@ -255,3 +258,51 @@ def test_blocks_for_only_falls_back_on_pre_genesis(monkeypatch):
         return 42
     monkeypatch.setattr(hs, "find_block_at_or_before", genesis)
     assert lifi._blocks_for("unichain", 1, 3) == (0, 42)   # end_ts-1 = 2 resolves normally
+
+
+def test_unknown_completion_emitter_is_logged_not_trusted(caplog):
+    started = [_started("0xo", "oserofrontend", dest=1)]
+    spoof = _completed("0xspoof", emitter="0x00000000000000000000000000000000000000bad")
+    with caplog.at_level("WARNING"):
+        txs, _ = lifi.anchored_deliveries(P, "ethereum", [], started, [spoof], [])
+    assert txs == frozenset()
+    assert any("UNKNOWN emitter" in m for m in caplog.messages)
+
+
+def test_generic_and_started_rows_must_come_from_the_diamond():
+    fake = LogRow(**{**_generic("0xa", "oserofrontend").__dict__, "address": "0x00000000000000000000000000000000000000bad"})
+    txs, _ = lifi.anchored_deliveries(P, "ethereum", [fake], [], [], [])
+    assert txs == frozenset()
+
+
+def test_origin_scan_has_a_lead_margin_and_resolve_short_circuits(monkeypatch):
+    """Origin chains are scanned from start - ORIGIN_LEAD_SECONDS (a bridge
+    started just before the window can deliver inside it); a start at/after
+    the scan end skips every query."""
+    from drhs import hypersync as hs
+    asked = []
+    monkeypatch.setattr(hs, "block_at_or_genesis", lambda chain, ts: asked.append((chain, ts)) or 10)
+    monkeypatch.setattr(hs, "find_block_at_or_before", lambda chain, ts: 20)
+    monkeypatch.setattr(hs, "query_logs", lambda *a, **k: hs.QueryResult(rows=[]))
+    prog = lifi.IntegratorProgram("t", 3900, "oserofrontend", origin_chains=("base",), start=date(2026, 7, 1))
+    end_ts = 1_785_542_400  # 2026-08-01
+    prog.resolve(SUSDS, 0, 100, end_ts)
+    start_ts = 1_782_864_000  # 2026-07-01 00:00 UTC
+    assert ("base", start_ts - lifi.ORIGIN_LEAD_SECONDS) in asked
+    asked.clear()
+    boom = lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not query"))
+    monkeypatch.setattr(hs, "query_logs", boom)
+    late = lifi.IntegratorProgram("t", 3900, "oserofrontend", origin_chains=("base",), start=date(2026, 9, 1))
+    assert late.resolve(SUSDS, 0, 100, end_ts).txs == frozenset()
+
+
+def test_block_at_or_genesis(monkeypatch):
+    from drhs import hypersync as hs
+    import pytest
+    def boom(chain, ts): raise hs.HyperSyncError("HyperSync ethereum -> HTTP 503")
+    monkeypatch.setattr(hs, "find_block_at_or_before", boom)
+    with pytest.raises(hs.HyperSyncError, match="503"):
+        hs.block_at_or_genesis("ethereum", 1)
+    monkeypatch.setattr(hs, "find_block_at_or_before",
+                        lambda c, ts: (_ for _ in ()).throw(hs.HyperSyncError("find_block_at_or_before(unichain, ts=1): target precedes genesis.")))
+    assert hs.block_at_or_genesis("unichain", 1) == 0

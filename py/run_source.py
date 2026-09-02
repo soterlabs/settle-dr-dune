@@ -69,15 +69,15 @@ SPECS: dict[str, SourceSpec] = {
     # Skybase's 1inch entrypoint program (the routers share one address on every
     # chain; resolved per target from the tx.to join).
     "susdc": SourceSpec(template_ab, template_ab.TEMPLATE_A_SUSDC, 7877542, excluded=_EXC,
-                        reroute=template_ab.REROUTED_CODES,
+                        reroute=template_ab.SUSDC_REROUTED,
                         synthetic=(template_ab.ONEINCH_SKYBASE,)),
     "susdc_mar": SourceSpec(
         template_ab, [template_ab.SUSDC_ETH, template_ab.SUSDC_BASE, template_ab.SUSDC_ARB],
-        7877542, excluded=_EXC, reroute=template_ab.REROUTED_CODES,
+        7877542, excluded=_EXC, reroute=template_ab.SUSDC_REROUTED,
         synthetic=(template_ab.ONEINCH_SKYBASE,)),
     "susdc_jun": SourceSpec(
         template_ab, [template_ab.SUSDC_OPT, template_ab.SUSDC_UNI], 7877542, excluded=_EXC,
-        reroute=template_ab.REROUTED_CODES, synthetic=(template_ab.ONEINCH_SKYBASE,)),
+        reroute=template_ab.SUSDC_REROUTED, synthetic=(template_ab.ONEINCH_SKYBASE,)),
     # Template C — L2 sUSDS via PSM3 Swap ref_code (balance from token Transfer).
     "susds_psm3": SourceSpec(template_c, template_c.ALL, 7877543, ref_kind="swaps", excluded=_EXC),
     "susds_psm3_base": SourceSpec(template_c, [template_c.BASE], 7877543, ref_kind="swaps", excluded=_EXC),

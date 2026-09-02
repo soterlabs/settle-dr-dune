@@ -77,6 +77,11 @@ last-referral-wins the tag sticks to a net-zero address and earns nothing.
 Precedence is unchanged: real user `Referral` > re-routed code > delivery
 pseudo-tag; a later attribution signal ends the tag.
 
+Eligibility: `REROUTE_START` has no entry for 3006 yet, so the re-route
+applies from genesis — which is what moves July (+$0.77). If ops decides 3006
+is payable from a given settlement only, `REROUTE_START[3006] = date(...)` is
+the whole change. The sUSDC sources re-route **only** 3006 (`SUSDC_REROUTED`).
+
 Known, accepted gaps: the two single-event owners above sit below
 `MIN_INTERMEDIARY_EVENTS = 3` and are not re-routed (2 deposits). If either
 address recurs it crosses the threshold retroactively on the next run.
