@@ -147,13 +147,130 @@ def query_logs(
     log_fields: list[str] | None = None,
     block_fields: list[str] | None = None,
     post: Callable[..., Any] = requests.post,
+    use_cache: bool | None = None,
 ) -> QueryResult:
-    """Fetch all logs matching ``selections`` in ``[from_block, to_block]`` (inclusive).
+    """Fetch all logs matching ``selections`` in ``[from_block, to_block]``
+    (inclusive) — served from the persistent log cache where possible, with
+    only uncovered blocks fetched live (drhs.logcache; disable via
+    DRHS_NO_LOG_CACHE=1 or the pipeline's --no-cache for the pre-cache,
+    all-network behaviour).
+
+    ``use_cache`` is the explicit seam: True/False force it; the default None
+    auto-selects — cached only for the default transport (an injected ``post``
+    means a test/fixture whose fake responses must never persist as chain
+    truth) with the env flag unset. Anything stubbing the network at a level
+    the identity check cannot see (e.g. patching _query_logs_live) must pass
+    use_cache=False or point DRHS_CACHE_DIR at a scratch dir.
 
     ``selections`` is HyperSync's ``logs`` array — each entry is
     ``{"address": [...], "topics": [[topic0...], [topic1...], ...]}``; multiple
-    entries are OR'd. Pages are followed via ``next_block`` until ``to_block``.
+    entries are OR'd. An injected ``post`` (tests, fixtures) always bypasses
+    the cache: fake responses must never be persisted as chain truth.
+
+    Contract note: ``QueryResult.archive_height`` reflects only the live
+    fetches this call made — it is 0 for a fully-cached request. No caller
+    reads it off query_logs today (they call ``archive_height()`` directly);
+    keep it that way or probe explicitly. Cache writes are best-effort: a
+    failed persist (disk full, etc.) logs a warning and the query still
+    returns its rows.
     """
+    from drhs import logcache
+
+    lf = log_fields or _DEFAULT_LOG_FIELDS
+    if use_cache is None:
+        use_cache = post is requests.post and logcache.enabled()
+    if not use_cache:
+        return _query_logs_live(chain, selections, from_block, to_block,
+                                log_fields=log_fields, block_fields=block_fields,
+                                post=post)
+    if to_block < from_block:
+        return QueryResult()  # degenerate range: empty, like the live path
+
+    key = logcache.cache_key(chain, selections, lf)
+    d = logcache.entry_dir(chain, key)
+    meta = logcache.load_meta(d)
+    meta_args = {"chain": chain, "selections": selections, "log_fields": lf}
+    depth = logcache.SAFE_DEPTH_BLOCKS.get(chain, logcache._DEFAULT_SAFE_DEPTH)
+    result = QueryResult()
+
+    # Coverage starts above the request: fill downward first — but only when
+    # the request reaches coverage (to_block >= cached_from-1); a request
+    # disjoint below is served live without the surplus gap-fetch (pre-cache
+    # cost bound). Persist only a provably complete fetch (archive_height==0
+    # skips _query_logs_live's incomplete-range guard, and a truncated
+    # backfill would become a PERMANENT hole every later run replays);
+    # depth-safety holds because the range sits below coverage persisted
+    # under an earlier head.
+    low_rows: list[LogRow] = []
+    if meta is not None and from_block < meta.cached_from:
+        low_to = meta.cached_from - 1 if to_block >= meta.cached_from - 1 else to_block
+        low = _query_logs_live(chain, selections, from_block, low_to,
+                               log_fields=log_fields, block_fields=block_fields)
+        result.archive_height = low.archive_height
+        new_meta = None
+        if low.archive_height > 0 and low_to == meta.cached_from - 1:
+            new_meta = _persist(d, meta, meta_args, low.rows, from_block, low_to)
+        if new_meta is not None:
+            meta = new_meta
+        else:
+            low_rows = [r for r in low.rows if r.block_number <= to_block]
+
+    if meta is not None:
+        result.rows.extend(low_rows)  # below-coverage rows served live (rare)
+        lo, hi = max(from_block, meta.cached_from), min(to_block, meta.cached_through)
+        if hi >= lo:
+            result.rows.extend(logcache.read_rows(d, meta, lo, hi))
+
+    cov_hi = meta.cached_through if meta is not None else from_block - 1
+    if to_block > cov_hi:
+        live_from = max(from_block, cov_hi + 1)
+        live = _query_logs_live(chain, selections, live_from, to_block,
+                                log_fields=log_fields, block_fields=block_fields)
+        result.rows.extend(live.rows)
+        result.archive_height = max(result.archive_height, live.archive_height)
+        # Persist only blocks a safe depth below the head observed by THIS
+        # fetch (archive_height==0 makes safe_hi negative -> nothing persists),
+        # and only when the new segment abuts coverage — a request starting
+        # above cached_through+1 is served live without extending the cache
+        # (persisting it would hole the window; append_segment refuses).
+        safe_hi = min(to_block, live.archive_height - depth)
+        abuts = meta is None or live_from == meta.cached_through + 1
+        if safe_hi >= live_from and abuts:
+            # rows arrive block-ascending: cut, don't copy-scan the whole list
+            from itertools import takewhile
+            _persist(d, meta, meta_args,
+                     list(takewhile(lambda r: r.block_number <= safe_hi, live.rows)),
+                     live_from, safe_hi)
+    return result
+
+
+def _persist(d, meta, meta_args, rows, seg_from, seg_to):
+    """Best-effort cache write: the rows are already in hand, so a failed
+    persist (disk full, broken parquet install, ...) must degrade to a
+    warning, never fail the query. A half-written entry is safe: load_meta
+    refuses any inconsistency and the next run refetches. Returns the new
+    Meta, or None if the write failed."""
+    from drhs import logcache
+    try:
+        return logcache.append_segment(d, meta, meta_args, rows, seg_from, seg_to)
+    except Exception as exc:  # noqa: BLE001
+        _LOG.warning("log cache write failed for %s [%s,%s]: %s — serving "
+                     "live, entry not extended", d, seg_from, seg_to, exc)
+        return None
+
+
+def _query_logs_live(
+    chain: str,
+    selections: list[dict[str, Any]],
+    from_block: int,
+    to_block: int,
+    *,
+    log_fields: list[str] | None = None,
+    block_fields: list[str] | None = None,
+    post: Callable[..., Any] = requests.post,
+) -> QueryResult:
+    """The raw network fetch — pages followed via ``next_block`` until
+    ``to_block``. Always complete or raising; never partial."""
     lf = log_fields or _DEFAULT_LOG_FIELDS
     bf = block_fields or _DEFAULT_BLOCK_FIELDS
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {_token()}"}

@@ -240,7 +240,11 @@ def main() -> int:
                     default=DEFAULT_END)
     ap.add_argument("--chunks-dir", type=Path, default=DEFAULT_CHUNKS_DIR)
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--no-cache", action="store_true",
+                    help="bypass the persistent log cache (see drhs/logcache.py)")
     args = ap.parse_args()
+    if args.no_cache:
+        os.environ["DRHS_NO_LOG_CACHE"] = "1"
 
     if args.list or not args.chunk:
         for name, (family, _s, _t, n) in chunk_plan().items():
