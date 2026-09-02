@@ -115,6 +115,14 @@ Displaced (net delta = **$0.00**):
 | 128 Spark.lend | −366.38 | |
 | 1002 DeFiSaver | −82.27 | |
 
+**sUSDC (all five chains, same method,
+`hypersync-results/measurements/oneinch_1020_susdc_delta.csv`):** 1inch routes
+into sUSDC only on ethereum — 6 router txs, 8 wallets, **$41.53** total
+(Oct 2025 → Aug 2026, peaking $6.5/month in Mar 2026, $0.51 in Aug 2026), all
+displaced from 127 (untagged sUSDC). base / arbitrum / optimism / unichain:
+**0** router txs in 210k / 105k / 30k / 77k sUSDC transfers — wired, nothing to
+attribute today.
+
 Read before choosing a start date:
 
 - **Half of the program comes out of CowSwap 1003, not out of untagged.** The
