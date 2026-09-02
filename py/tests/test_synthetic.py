@@ -470,7 +470,17 @@ def test_entrypoint_resolve_fetches_bounded_joined_window(monkeypatch):
         return hs.QueryResult(rows=[_tr_to("0xr", 1, EXEC, A, 1.0, V6)])
     monkeypatch.setattr(hs, "query_logs", fake_query)
     monkeypatch.setattr(hs, "find_block_at_or_before", lambda chain, ts: 5_000)   # block at program.start
-    prog = EntrypointProgram("t", 1020, ONEINCH_SKYBASE.entrypoints, start=date(2026, 9, 1))
-    resolved = prog.resolve(SUSDS, 0, 9_000, DAY)
+    prog = EntrypointProgram("t", 1020, ONEINCH_SKYBASE.entrypoints, start=date(2026, 7, 1))
+    end_ts = 1_785_542_400   # 2026-08-01 00:00 UTC — the window [start, end) is non-empty
+    resolved = prog.resolve(SUSDS, 0, 9_000, end_ts)
     assert calls == [(5_000, 9_000, True)]          # bounded below by start, joined
     assert resolved.txs == {"0xr"} and resolved.contracts == frozenset()
+
+
+def test_entrypoint_resolve_skips_query_when_window_is_after_scan_end(monkeypatch):
+    from drhs import hypersync as hs
+    def boom(*a, **k): raise AssertionError("must not query")
+    monkeypatch.setattr(hs, "query_logs", boom); monkeypatch.setattr(hs, "find_block_at_or_before", boom)
+    prog = EntrypointProgram("t", 1020, ONEINCH_SKYBASE.entrypoints, start=date(2026, 9, 1))
+    end_ts_aug = 1_788_220_800   # 2026-09-01 00:00 UTC == the August scan end
+    assert prog.resolve(SUSDS, 0, 9_000, end_ts_aug).txs == frozenset()

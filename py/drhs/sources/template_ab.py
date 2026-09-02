@@ -122,6 +122,10 @@ class EntrypointProgram:
         re-key its largest cache entries and maintain a second copy forever,
         for rows the window can never tag."""
         if self.start is not None:
+            if midnight_ts(self.start) >= end_ts:
+                # window entirely after the scan end (e.g. start = next
+                # settlement): nothing can be tagged — no query at all
+                return self.resolve_from_rows([])
             from_block = max(from_block, hypersync.find_block_at_or_before(
                 target.blockchain, midnight_ts(self.start)))
         rows = hypersync.query_logs(
