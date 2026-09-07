@@ -63,18 +63,27 @@ def enabled() -> bool:
 
 
 def cache_key(chain: str, selections: list[dict[str, Any]],
-              log_fields: list[str]) -> str:
+              log_fields: list[str], with_tx_to: bool = False) -> str:
     """Content hash of exactly what is asked for. Canonical JSON (sorted keys,
     lowercased strings) so semantically identical queries share an entry and
-    ANY difference — one more address, one more topic — is a separate one."""
+    ANY difference — one more address, one more topic — is a separate one.
+
+    ``with_tx_to`` (the transaction join that fills ``LogRow.tx_to``) is part
+    of the key: an entry fetched without the join has ``tx_to = None`` on
+    every row and must never satisfy a query that needs it (an entrypoint
+    program would silently resolve to nothing). Added to the blob only when
+    True so pre-existing entries keep their keys."""
     def _canon(v):
         if isinstance(v, dict):
             return {k: _canon(v[k]) for k in sorted(v)}
         if isinstance(v, list):
             return [_canon(x) for x in v]
         return v.lower() if isinstance(v, str) else v
-    blob = json.dumps({"chain": chain, "selections": _canon(selections),
-                       "log_fields": list(log_fields)}, separators=(",", ":"))
+    blob_d: dict[str, Any] = {"chain": chain, "selections": _canon(selections),
+                              "log_fields": list(log_fields)}
+    if with_tx_to:
+        blob_d["with_tx_to"] = True
+    blob = json.dumps(blob_d, separators=(",", ":"))
     return hashlib.sha256(blob.encode()).hexdigest()[:32]
 
 
@@ -91,6 +100,7 @@ class Meta:
     cached_from: int
     cached_through: int
     segments: list  # [{"file", "from", "to"}], contiguous & ascending
+    with_tx_to: bool = False   # absent in pre-join meta.json -> False
 
 
 def load_meta(d: Path) -> Meta | None:
@@ -101,7 +111,7 @@ def load_meta(d: Path) -> Meta | None:
         m = Meta(**json.loads(p.read_text()))
     except Exception:  # noqa: BLE001 — corrupt meta: treat as no cache
         return None
-    if cache_key(m.chain, m.selections, m.log_fields) != d.name:
+    if cache_key(m.chain, m.selections, m.log_fields, m.with_tx_to) != d.name:
         return None  # entry moved/swapped under a wrong key (ops mishap):
         # its content answers a different query — refuse, refetch
     lo = m.cached_from
@@ -120,7 +130,11 @@ def _write_meta(d: Path, m: Meta) -> None:
     # later os.replace wins and the loser's update is lost, which load_meta
     # tolerates (still self-consistent) and the next run refetches.
     tmp = d / f"meta.json.{os.getpid()}.tmp"
-    tmp.write_text(json.dumps(m.__dict__))
+    # Serialise ``with_tx_to`` only when True: entries without the join keep a
+    # meta.json a pre-join checkout can still load (its Meta(**json) would
+    # reject the unknown field, treat the entry as absent and rewrite it).
+    body = {k: v for k, v in m.__dict__.items() if not (k == "with_tx_to" and not v)}
+    tmp.write_text(json.dumps(body))
     os.replace(tmp, d / "meta.json")
 
 
@@ -138,11 +152,15 @@ def read_rows(d: Path, m: Meta, from_block: int, to_block: int) -> list:
             continue
         # filters= prunes row groups before decompression — a partial read of
         # a big Base segment must not load the whole thing
-        t = pq.read_table(d / seg["file"], columns=names,
+        # Segments written before a LogRow field existed (e.g. ``tx_to``) lack
+        # its column: read what is there, default the rest — the dataclass
+        # default is exactly what the fetch would have produced.
+        present = [c for c in names if c in pq.read_schema(d / seg["file"]).names]
+        t = pq.read_table(d / seg["file"], columns=present,
                           filters=[("block_number", ">=", from_block),
                                    ("block_number", "<=", to_block)])
-        cols = [t.column(c).to_pylist() for c in names]
-        rows.extend(LogRow(**dict(zip(names, vals))) for vals in zip(*cols))
+        cols = [t.column(c).to_pylist() for c in present]
+        rows.extend(LogRow(**dict(zip(present, vals))) for vals in zip(*cols))
     return rows
 
 

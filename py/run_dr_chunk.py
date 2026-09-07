@@ -77,10 +77,17 @@ def scan_chains(names) -> set[str]:
     plan = chunk_plan()
     chains: set[str] = set()
     for name in names:
-        family, _src, t, _n = plan[name]
+        family, src, t, _n = plan[name]
         chains |= {t.blockchain, "ethereum"}
         if pipeline.SOURCE_MONTHLY[family][3]:  # is_sp
             chains.add("avalanche_c")
+        # anchored programs scan their ORIGIN chains too (Li.Fi bridges into the
+        # target): a lagging origin archive would silently under-anchor the
+        # month-end bridges, so those chains join the coverage guard.
+        for p in SPECS[src].synthetic:
+            for oc in getattr(p, "origin_chains", ()):
+                if oc in hypersync.HYPERSYNC_HOSTS:
+                    chains.add(oc)
     return chains
 
 

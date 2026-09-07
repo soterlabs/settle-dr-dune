@@ -75,7 +75,12 @@ This is a registry entry — no new code:
 
    Programs in one source terminate each other automatically (last delivery
    wins), so overlap wallets (48 CowSwap∩Paraswap wallets in the audit) are
-   split into correctly attributed segments, never double counted.
+   split into correctly attributed segments, never double counted. Two
+   programs that both claim one delivery (a shared contract, or a contract
+   program and an entrypoint program in one tx) tie on `log_index`; the tie
+   goes to the **last program in the `synthetic` tuple**. The recipient skip
+   ("a transfer into a program contract is a hop, not a delivery") is
+   **per program**: adding a program never changes another program's tags.
 
 3. **Tests**: add cases to `py/tests/test_synthetic.py` (delivery tagged,
    forwarder not tagged, window enforced, cross-program termination). The
@@ -86,7 +91,13 @@ This is a registry entry — no new code:
    with/without the program restricted to affected wallets (the diff is exact
    because nobody else's TWA can change) and report the per-code deltas —
    see the "Implemented + measured" section of the CowSwap doc for the
-   template. This is what ops signs off on (requirement 4).
+   template. This is what ops signs off on (requirement 4). **Run the
+   "with" side with the full production program set** (CowSwap, every
+   re-routed code, the other anchored programs): a later signal from another
+   program ends your tag, and a measurement that omits it overstates the
+   program (Osero 3006: $5.20 standalone vs $1.43 in the pipeline — one
+   wallet later bought via CowSwap). The authoritative check is a full
+   regeneration diffed against the committed outputs.
 
 ### B. Referral-emitting aggregator (the Paraswap / 1inch shape) — IMPLEMENTED
 
@@ -107,22 +118,56 @@ redeployments are picked up automatically. Precedence per (tx, user): real
 user Referral > re-routed code > delivery pseudo-tag. This is the corrected
 descendant of the removed `referral_per_tx_fallback` CTE.
 
-### C. Referral-less aggregator without a fixed delivery contract (0x Settler / Enso shape)
+**Hops.** The default re-route follows the *direct* owner → recipient edge
+only; a recipient that itself forwards on (net ≤ 0 in the tx) is a hop and is
+not tagged. Some integrations forward twice — Jumper Earn's Sky deposit adapter
+mints with 3006, hands the shares to the LiFiDiamond, and the Diamond delivers
+to the user — so nothing would be re-routed. For those, add the code to
+`template_ab.REROUTE_FOLLOW_HOPS` as well: the walk then continues through
+net-zero forwarders to the first net-positive recipients — following only
+transfers that happen **after** the hop received the shares (earliest funding
+edge along any path, so the result is independent of row order), so an
+unrelated earlier delivery out of a shared router never inherits the code.
+Re-routing replays from genesis; a per-code eligibility start goes in
+`template_ab.REROUTE_START` (delivery date ≥ start) — the same knob
+`SyntheticProgram` / `EntrypointProgram` carry — so allowlisting a code need
+not re-attribute settled months. It is opt-in
+per code on purpose — 1004 / 4011 were settled under the direct rule and must stay
+byte-identical. See [`osero-codes.md`](osero-codes.md).
 
-No Referral events at all (shape B unavailable) *and* delivery comes from
-rotating/per-user contracts (shape A unavailable). Only the tx *entrypoint*
-(`tx.to`) identifies the program. Not implemented; build when the first such
-program is approved:
+Wire `reroute=template_ab.REROUTED_CODES` on **every source whose token the
+partner deposits into** — `susds_eth` alone missed 58 of 65 Jumper events,
+which were on sUSDC L2s.
 
-- add `entrypoints: frozenset[str]` to `SyntheticProgram`;
-- collect program tx hashes with one HyperSync **transaction** query
-  (`{"transactions": [{"to": [...]}]}`, fields `hash`,`block_number`) over the
-  scan window;
-- tag **net-positive recipients** among those txs' transfers — all other
-  rules and merge/precedence semantics unchanged.
+### C. Aggregator without a fixed delivery contract (1inch / 0x Settler / Enso shape) — IMPLEMENTED
 
-Known gap to accept (or supplement with executor discovery): contract-wallet /
-ERC-4337 users don't have `tx.to = router`.
+Delivery comes from rotating per-solver executors or straight from pools
+(1inch on sUSDS-eth: only 11 % of router txs have a router → user edge), so
+shape A cannot see it. Only the tx *entrypoint* (`tx.to`) identifies the
+program. `template_ab.EntrypointProgram(name, code, entrypoints, start, end)`:
+
+- the program fetches **its own** `Transfer` rows with the transaction join
+  (`query_logs(..., with_tx_to=True)` → `LogRow.tx_to`) over its eligibility
+  window only, and resolves to `txs = {tx : tx.to ∈ entrypoints}`. The
+  pipeline's full Transfer stream is left alone on purpose: joining it would
+  re-key the largest cache entries and maintain a second copy forever for rows
+  the window can never tag;
+- inside those txs, **every incoming transfer (mints included) to a
+  net-positive wallet** is a delivery; forwarders net to ≤ 0 and are skipped —
+  all other rules and precedence unchanged.
+
+First use: Skybase's 1inch program 1020, [`oneinch-1020-skybase.md`](oneinch-1020-skybase.md).
+Known gap: contract-wallet / ERC-4337 users have `tx.to = EntryPoint`, not the
+router (45 such txs observed).
+
+### D. Multi-tenant router with an integrator id (Li.Fi shape) — IMPLEMENTED
+
+One delivery contract shared by many integrators: tagging all its deliveries
+would hand the program other frontends' users. Anchor on the router's own
+events that carry the integrator id — `drhs/sources/lifi.py`
+(`IntegratorProgram`), same-chain + cross-chain joined on `transactionId` —
+and restrict an ordinary `SyntheticProgram` to those txs (`txs`).
+[`lifi-oserofrontend.md`](lifi-oserofrontend.md).
 
 ## Sanity checklist before enabling
 

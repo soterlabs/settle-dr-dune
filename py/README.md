@@ -174,6 +174,21 @@ Per-token migration off Dune onto Envio HyperSync:
         `combine-dr-results.ts` — wires TWA→rates→conversions→deployment→monthly
         and merges the per-source outputs into the per-ref_code rollups.
 
+## Attribution extensions (post-Dune)
+
+- **Custody perimeters** (`drhs/sources/custody.py`) — a strategy's named Morpho
+  position counted as still held (Osero 3009, `docs/osero-looping-vault.md`).
+- **Re-routed intermediary codes** (`template_ab.REROUTED_CODES`) — 1004 / 4011 /
+  **3006**; codes in `REROUTE_FOLLOW_HOPS` (3006) chase net-zero forwarders
+  transitively (Jumper adapter → LiFiDiamond → user). Wired on `susds_eth` and
+  the sUSDC sources. `docs/osero-codes.md`.
+- **Tx-anchored synthetic programs** (`SyntheticProgram.txs`) — a router's
+  deliveries tagged only inside the program's own txs. Two anchors:
+  integrator id on the router's events (`drhs/sources/lifi.py`, Li.Fi
+  `oserofrontend` → 3900, `docs/lifi-oserofrontend.md`) and tx entrypoint
+  (`template_ab.EntrypointProgram`, 1inch routers → Skybase 1020,
+  `docs/oneinch-1020-skybase.md`; `Transfer` rows fetched with the tx join).
+
 ## Dune is fully replaced
 
 Every DR query — Layer 0/1 TWA (all 5 templates) **and** Layer 2–4

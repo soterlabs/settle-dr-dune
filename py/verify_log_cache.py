@@ -61,8 +61,8 @@ def main() -> int:
             lo = rng.randint(meta.cached_from, meta.cached_through - span + 1)
             hi = lo + span - 1
             cached = logcache.read_rows(d, meta, lo, hi)
-            live = _query_logs_live(chain, sels, lo, hi,
-                                    log_fields=meta.log_fields).rows
+            live = _query_logs_live(chain, sels, lo, hi, log_fields=meta.log_fields,
+                                    with_tx_to=meta.with_tx_to).rows
             import dataclasses
             ok = sorted(map(dataclasses.astuple, cached)) \
                 == sorted(map(dataclasses.astuple, live))
