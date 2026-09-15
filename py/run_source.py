@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 load_dotenv(ROOT / ".env")
 
 from drhs import twa  # noqa: E402
-from drhs.sources import custody, holder, lifi, template_ab, template_c, template_d  # noqa: E402
+from drhs.sources import custody, holder, lifi, skybase, template_ab, template_c, template_d  # noqa: E402
 
 _EXC = template_ab.TEMPLATE_A_EXCLUDED
 
@@ -50,6 +50,9 @@ class SourceSpec:
 
 
 SPECS: dict[str, SourceSpec] = {
+    "skybase_pendle": SourceSpec(skybase, [skybase.PENDLE], 0),
+    "skybase_flagship": SourceSpec(skybase, [skybase.FLAGSHIP], 0),
+    "skybase_risk_capital": SourceSpec(skybase, [skybase.RISK_CAPITAL], 0),
     # Template B — stUSDS (no exclusions). Full-history parity confirmed.
     "stusds": SourceSpec(template_ab, [template_ab.STUSDS], 7877544),
     # Template A — sUSDS / sUSDC (protocol-holder exclusions). sUSDS eth also

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from typing import Callable
+from calendar import monthrange
 
 import pandas as pd
 
@@ -114,6 +115,16 @@ def monthly_dr(
     if twa.empty:
         return pd.DataFrame(columns=["month", "blockchain", "token", "ref_code", "dr_usd"])
     df = twa[twa["time_weighted_avg_balance"] > 0].copy()
+    from ..sources.skybase import BY_CODE
+    for code, target in BY_CODE.items():
+        reserved = df[df.ref_code == code]
+        if not reserved.empty and not (
+            (reserved.user_addr.str.lower() == target.holder)
+            & (reserved.contract_address.str.lower() == target.token)
+            & (reserved.blockchain == target.blockchain)
+            & (reserved.symbol == target.symbol)
+        ).all():
+            raise ValueError(f"Skybase synthetic code {code} collides with another venue")
     df["dt_s"] = df["dt"].astype(str).str[:10]
     df["ref2"] = [reclassify(s, int(r), u, c)
                   for s, r, u, c in zip(df["symbol"], df["ref_code"], df["user_addr"], df["blockchain"])]
@@ -125,6 +136,11 @@ def monthly_dr(
     def _tw_reward(row) -> float:
         token, amount, dt_s, chain = row["token"], row["amount"], row["dt_s"], row["blockchain"]
         d = date.fromisoformat(dt_s)
+        if int(row["ref2"]) in BY_CODE:
+            # Memo: calendar-month mean * 0.2% / 12, no Integration Boost.
+            # Zero-balance days still belong to the denominator; mid-month
+            # launches/partial windows do not get a full month's reward.
+            return amount * 0.002 / (12 * monthrange(d.year, d.month)[1])
         rp = rates.daily_rate(rates.TOKEN_REWARD_CODE.get(token, "XR"), d)
         if sp_deployment is not None:
             if token == "spETH":

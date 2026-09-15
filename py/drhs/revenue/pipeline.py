@@ -41,6 +41,9 @@ def _stusds_conv():
 
 # key -> (twa source names, reclassify, conv-builder, is_sp)
 SOURCE_MONTHLY = {
+    "skybase_pendle": (["skybase_pendle"], monthly.reclass_none, _susds_conv, False),
+    "skybase_flagship": (["skybase_flagship"], monthly.reclass_none, lambda: monthly.const_conv, False),
+    "skybase_risk_capital": (["skybase_risk_capital"], monthly.reclass_none, lambda: monthly.const_conv, False),
     "susds_susdc": (["susds_eth", "susdc"], monthly.reclass_susds_susdc, _susds_conv, False),
     "stusds": (["stusds"], monthly.reclass_none, _stusds_conv, False),
     "farms": (["usds_farms"], monthly.reclass_none, lambda: monthly.const_conv, False),
