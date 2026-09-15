@@ -120,7 +120,7 @@ Production computation remains HyperSync-only.
 
 ## Validation and accrual additions (2026-09-15)
 
-- Full offline suite: **87 passed**, including the new shared-market,
+- Full offline suite after rebasing onto PR #19: **132 passed**, including the new shared-market,
   outside-lender, fee-dilution, borrow, liquidation, burned-share, wallet
   relocation, referral-collision and SY reconciliation cases.
 - At block **25878704** (last block before 2026-09-01), replay equals RPC
