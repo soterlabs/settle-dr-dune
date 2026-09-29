@@ -1,0 +1,6 @@
+pandas
+requests
+python-dotenv
+openpyxl
+pyarrow
+eth-hash[pycryptodome]

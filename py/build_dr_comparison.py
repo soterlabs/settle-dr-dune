@@ -57,6 +57,9 @@ def eligibility(code: int) -> tuple[str, str | None]:
     return ELIGIBILITY_OVERRIDES.get(code, (ELIGIBILITY_DEFAULT_START, None))
 
 NOTES = {
+    1997: "Skybase synthetic: Pendle SY sUSDS backing; whole wrapper counted once; flat 0.2% / 12.",
+    1998: "Skybase synthetic: USDS Flagship vault idle + its share of Morpho market idle USDS; no borrowed funds.",
+    1999: "Skybase synthetic: USDS Risk Capital vault idle + its share of Morpho market idle USDS; no borrowed funds.",
     -999999: "Synthetic code: Untagged USDS-CLE, USDS-SKY, USDS-SPK, USDS-GROVE, stUSDS.",
     0: "Explicit on-chain referral on Ethereum. L2 sUSDS split to 10000/10001.",
     99: "Synthetic code: Untagged sUSDS.",
@@ -178,6 +181,17 @@ rows.append(["SYNTHETIC & UNPAID (tracked, no beneficiary — notional dr_usd; "
              "", "", *[""] * len(MONTHS_2026), "", "all-time total", ""])
 rows.extend(nonpay_rows)
 write_aoa("Payable by Ref Code", rows)
+
+# Newly onboarded venues: 2026 historical accrual additions, not a payment ledger.
+from drhs.sources.skybase import BY_CODE as SKYBASE_CODES  # noqa: E402
+_new = (df[df.ref_code.isin(SKYBASE_CODES)]
+        .groupby(["month_s", "ref_code", "source"])["dr_usd"].sum().reset_index())
+_new = _new.rename(columns={"month_s": "month", "dr_usd": "accrued_usds"})
+_new["eligible_for_payment_view"] = [
+    eligibility(int(c))[0] <= m and (eligibility(int(c))[1] is None or m < eligibility(int(c))[1])
+    for c, m in zip(_new.ref_code, _new.month)]
+write_aoa("Skybase Historical Additions", [list(_new.columns), *_new.values.tolist()])
+_new.to_csv(REPO / "hypersync-results" / "skybase_historical_additions.csv", index=False)
 
 # --- reference tabs copied verbatim --------------------------------------------
 REFS = ["Spark", "Amatsu", "BA", "Payouts"]

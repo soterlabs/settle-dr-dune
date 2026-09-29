@@ -1,5 +1,16 @@
 # DR pipeline on HyperSync (event-driven replacement for the Dune SQL)
 
+Current settlement workflow: install runtime dependencies with
+`.venv/bin/pip install -r py/requirements.txt`, then run
+`.venv/bin/python py/run_dr_pipeline.py` and
+`.venv/bin/python py/build_dr_comparison.py`. The default runner uses resumable
+chunks and the cutoff in `drhs/window.py`. For tests, install `pytest` and run
+`.venv/bin/python -m pytest py/tests -q`.
+
+Skybase codes **1997–1999** now cover Pendle SY backing and the Flagship/Risk
+Capital Morpho vaults' unborrowed USDS. See
+[methodology, audit and historical additions](../docs/skybase-pendle-morpho.md).
+
 This package reconstructs the Distribution-Rewards (DR) per-user **time-weighted
 average balance (TWA)** — the foundation of every DR figure — directly from raw
 on-chain **events pulled via Envio HyperSync**, replacing the Dune `twa_*.sql`
