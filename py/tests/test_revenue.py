@@ -47,6 +47,7 @@ def test_token_reward_codes():
     assert rates.TOKEN_REWARD_CODE["stUSDS"] == "XR-stUSDS"
     assert rates.TOKEN_REWARD_CODE["sUSDC"] == "XR"       # boosted to XR
     assert rates.TOKEN_REWARD_CODE["spETH"] == "XR*"
+    assert rates.TOKEN_REWARD_CODE["USDS-GROVE"] == "XR"
 
 
 def test_monthly_reclass_and_formula():

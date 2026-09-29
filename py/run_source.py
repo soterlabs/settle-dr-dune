@@ -89,6 +89,7 @@ SPECS: dict[str, SourceSpec] = {
     "usds_farm_sky": SourceSpec(template_d, [template_d.SKY], 7877545),
     "usds_farm_spk": SourceSpec(template_d, [template_d.SPK], 7877545),
     "usds_farm_cle": SourceSpec(template_d, [template_d.CLE], 7877545),
+    "usds_farm_grove": SourceSpec(template_d, [template_d.GROVE], 7877545),
     # Template F — class-D contract-tagged holders (full contract balance to a
     # synthetic code; intraday TWA — see drhs/sources/holder.py).
     "usds_aave": SourceSpec(holder, [holder.AAVE_USDS], 7877569),

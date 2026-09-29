@@ -1,4 +1,4 @@
-"""Template D: USDS staking-farm per-user daily TWA (Sky / Spk / Chronicle, eth).
+"""Template D: USDS staking-farm TWA (Sky/Spk/Chronicle/Grove, Ethereum).
 
 SNX-style StakingRewards clones with a referral-emitting wrapper. Balance is NOT
 from share Transfers — it's from the staking events:
@@ -8,8 +8,9 @@ ref_code from the wrapper's Referral(uint16 indexed, address indexed user,
 uint256) matched by (tx_hash, user), forward-filled. Mirrors
 queries/twa_usds_staking_farms.sql. No address exclusions.
 
-All three farms share the "StakingRewards" bytecode (one decoded table on Dune),
-separated by contract_address. Symbols USDS-SKY / USDS-SPK / USDS-CLE.
+All four farms share the "StakingRewards" bytecode (one decoded table on Dune),
+separated by contract_address. Symbols USDS-SKY / USDS-SPK / USDS-CLE /
+USDS-GROVE.
 """
 
 from __future__ import annotations
@@ -37,7 +38,8 @@ class FarmTarget:
 SKY = FarmTarget("ethereum", "USDS-SKY", "0x0650caf159c5a49f711e8169d4336ecb9b950275", 18, date(2024, 9, 1))
 SPK = FarmTarget("ethereum", "USDS-SPK", "0x173e314c7635b45322cd8cb14f44b312e079f3af", 18, date(2024, 9, 1))
 CLE = FarmTarget("ethereum", "USDS-CLE", "0x10ab606b067c9c461d8893c47c7512472e19e2ce", 18, date(2024, 9, 1))
-ALL = [SKY, SPK, CLE]
+GROVE = FarmTarget("ethereum", "USDS-GROVE", "0x4e41488c19cd35eb4de3083fc3e204854c75c86a", 18, date(2026, 6, 1))
+ALL = [SKY, SPK, CLE, GROVE]
 
 
 def _end_ts(end_date: date) -> int:

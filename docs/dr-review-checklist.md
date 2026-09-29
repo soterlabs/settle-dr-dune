@@ -6,7 +6,7 @@ This document summarises the scope, methodology, open questions, and contract in
 
 ## 1. Token and Contract Coverage
 
-All contracts listed are on Ethereum mainnet unless noted. All three USDS staking contracts share the same Synthetix-style `StakingRewards` ABI (`Staked` / `Withdrawn` / `Referral` events).
+All contracts listed are on Ethereum mainnet unless noted. All four USDS staking contracts share the same Synthetix-style `StakingRewards` ABI (`Staked` / `Withdrawn` / `Referral` events).
 
 ### USDS Staking (Token Rewards Contracts)
 
@@ -15,8 +15,9 @@ All contracts listed are on Ethereum mainnet unless noted. All three USDS stakin
 | Sky Farm | `0x0650CAF159C5A49f711e8169D4336ECB9b950275` | USDS → SKY rewards. Rate: XR |
 | Spk Farm | `0x173e314C7635B45322cd8Cb14f44b312e079F3af` | USDS → SPK rewards. Rate: XR |
 | Chronicle | `0x10ab606b067c9c461d8893c47c7512472e19e2ce` | USDS → CLE points. Rate: XR |
+| Grove Farm | `0x4E41488C19cD35EB4de3083Fc3e204854c75c86a` | USDS → GROVE rewards. Rate: XR |
 
-> Currently only Sky Farm is partially covered in Dune (opaque, aggregate-only). Spk Farm and Chronicle have **zero** Dune coverage.
+> Currently only Sky Farm is partially covered in Dune (opaque, aggregate-only). Spk Farm, Chronicle, and Grove Farm have **zero** coverage in that dataset.
 
 ---
 
@@ -125,7 +126,7 @@ The spec defines four tracking methodologies ([Atlas A.2.2.8.1](https://sky-atla
 ## 3. Calculation Methodology
 
 ### Event Tracking
-- For staking farms (Sky/Spk/Chronicle): `Staked`, `Withdrawn`, `Referral` events.
+- For staking farms (Sky/Spk/Chronicle/Grove): `Staked`, `Withdrawn`, `Referral` events.
 - For ERC4626 farms (sUSDS, sUSDC, stUSDS, sp*): `Deposit`, `Withdraw`, `Referral` events (and optionally `Transfer` for peer-to-peer share movement).
 - For PSM3 L2 sUSDS: `Swap` event with `referralCode` inline.
 - Referral code is read from: the deposit/staked event directly (sUSDS, sUSDC, staking farms) OR a separate `Referral` event in the same transaction matched by `tx_hash` (stUSDS, sp* vaults).
@@ -173,7 +174,7 @@ Presentation overlay        — referral_type tagging (Spark-internal vs externa
 
 | Rate code | Applies to | 2024–2025 | 2026+ | Notes |
 |---|---|---|---|---|
-| XR | sUSDS, USDS staking (Sky/Spk/Chronicle) | 0.60% | **0.50%** | |
+| XR | sUSDS, USDS staking (Sky/Spk/Chronicle/Grove) | 0.60% | **0.50%** | |
 | XR-stUSDS | stUSDS | 0.60% | **0.10%** | ⚠️ Amatsu pipeline uses **0.50%** in 2026+ — direct conflict with Dune. Must resolve (Q2) |
 | XR* | sUSDC, spUSDC, spUSDT, spPYUSD | 0.60% | **0.20%** | Lower tier for alternative-method assets |
 | AR | Spark Treasury USDS (institutional) | SSR + 0.60% | SSR + 0.20% | Not a DR code per spec; likely out of scope (Q6) |

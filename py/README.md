@@ -188,6 +188,9 @@ Per-token migration off Dune onto Envio HyperSync:
   `oserofrontend` → 3900, `docs/lifi-oserofrontend.md`) and tx entrypoint
   (`template_ab.EntrypointProgram`, 1inch routers → Skybase 1020,
   `docs/oneinch-1020-skybase.md`; `Transfer` rows fetched with the tx join).
+- **Grove USDS farm** (`template_d.GROVE`) — fourth Template-D staking farm,
+  added after the original Dune-parity fixture. Its `Staked`/`Withdrawn` and
+  `Referral` history is replayed from June 2026; see `docs/grove-usds-farm.md`.
 
 ## Dune is fully replaced
 

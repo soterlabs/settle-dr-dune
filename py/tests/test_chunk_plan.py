@@ -48,6 +48,15 @@ def test_families_filter_and_holder_sources_present():
     assert len(only_sp) == len(SPECS["sp_vaults"].targets)
 
 
+def test_grove_farm_is_a_production_chunk():
+    plan = chunk_plan()
+    name = "usds_farms_ethereum_USDS-GROVE"
+    assert name in plan
+    family, source, target, shards = plan[name]
+    assert (family, source, shards) == ("farms", "usds_farms", None)
+    assert target.address == "0x4e41488c19cd35eb4de3083fc3e204854c75c86a"
+
+
 def test_sharded_targets_exist_in_specs():
     """A SHARDS key that matches no real target is a silent no-op — forbid."""
     keys = {(src, t.blockchain, t.symbol)
