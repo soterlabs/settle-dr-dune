@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from drhs import events, twa
 from drhs.hypersync import LogRow
-from drhs.sources import skybase as s, holder
+from drhs.sources import skybase as s, holder, template_ab
 from drhs.revenue import monthly
 from drhs.window import midnight_ts
 
@@ -93,6 +93,9 @@ def test_pendle_backing_supply_reconciliation_and_donations(caplog):
     assert 'divergence' in caplog.text
     with pytest.raises(ValueError,match='below supply'):
         s.check_pendle_backing([],sy,START+1)
+
+def test_pendle_holder_is_excluded_from_template_a():
+    assert s.PENDLE.holder in template_ab.TEMPLATE_A_EXCLUDED
 
 def test_pendle_conversion_and_reserved_code_collision():
     d = dict(blockchain='ethereum',contract_address=s.SUSDS,symbol='sUSDS',
