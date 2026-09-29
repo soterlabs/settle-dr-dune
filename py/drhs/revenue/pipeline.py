@@ -27,7 +27,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from .. import twa
-from ..window import DEFAULT_END
+from ..window import DEFAULT_END, REWARD_END, REWARD_START
 from . import conversion, deployment, monthly
 
 
@@ -79,10 +79,23 @@ def combine(monthly_by_source: dict[str, pd.DataFrame]) -> dict[str, pd.DataFram
     Returns dr_monthly_combined, dr_rollup_by_refcode, dr_rollup_by_refcode_token
     (matching combine-dr-results.ts). Rollups pivot dr_usd by month with a total.
     """
-    combined = pd.concat(
-        [df.assign(source=src) for src, df in monthly_by_source.items() if not df.empty],
-        ignore_index=True,
-    )
+    frames = []
+    for src, df in monthly_by_source.items():
+        if df.empty:
+            continue
+        months = df["month"].astype(str)
+        parsed = pd.to_datetime(months, format="%Y-%m-%d", errors="coerce")
+        outside = (parsed.isna()
+                   | (parsed < pd.Timestamp(REWARD_START))
+                   | (parsed >= pd.Timestamp(REWARD_END))
+                   | (parsed.dt.day != 1))
+        if outside.any():
+            bad = sorted(months[outside].unique())
+            raise ValueError(
+                f"{src} contains reward months outside calendar year 2026: {bad}. "
+                "Recompute stale checkpoints with --fresh.")
+        frames.append(df.assign(source=src))
+    combined = pd.concat(frames, ignore_index=True)
 
     def _pivot(keys: list[str]) -> pd.DataFrame:
         g = combined.groupby(keys + ["month"])["dr_usd"].sum().reset_index()

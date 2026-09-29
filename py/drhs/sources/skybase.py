@@ -16,14 +16,12 @@ import pandas as pd
 from eth_hash.auto import keccak
 
 from .. import events, hypersync
-from ..window import DEFAULT_END, midnight_ts
+from ..window import DEFAULT_END, REWARD_END, REWARD_START, midnight_ts
 from . import holder
 from .custody import MORPHO_BLUE, CREATE_MARKET_TOPIC0
 
 LOG = logging.getLogger(__name__)
 GENESIS = 18_800_000  # before Morpho deployment, USDS, SY and both vaults
-REWARD_START = date(2026, 1, 1)
-REWARD_END = date(2027, 1, 1)
 SUSDS = "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd"
 # Fetch pre-2026 history to reconstruct the opening balances exactly; the
 # monthly calculator restricts rewards to [REWARD_START, REWARD_END).

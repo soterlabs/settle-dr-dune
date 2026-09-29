@@ -180,10 +180,13 @@ Per-token migration off Dune onto Envio HyperSync:
         Transfer events ÷ sp-vault TWA — spUSDC ratio 1.1e-16, idle exact vs 7877551.
       - `monthly.py` (dr_rewards_monthly_*): monthly DR = TWA × rate × conversion
         (× deployment for spUSDC), per-source reclassification — validated vs
-        7877552/553/554/555/565 (Σ reldiff ≤ 4.4e-10, dust only).
+        7877552/553/554/555/565 (Σ reldiff ≤ 4.4e-10, dust only). Every
+        source is hard-limited to calendar year 2026; older events may rebuild
+        opening state but cannot emit reward rows.
       - `pipeline.py` + `run_dr_pipeline.py`: Dune-free replacement for
         `combine-dr-results.ts` — wires TWA→rates→conversions→deployment→monthly
-        and merges the per-source outputs into the per-ref_code rollups.
+        and merges the per-source outputs into the per-ref_code rollups. The
+        combiner rejects stale checkpoints containing any non-2026 month.
 
 ## Attribution extensions (post-Dune)
 

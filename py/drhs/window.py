@@ -1,4 +1,8 @@
-"""The settled scan window — THE one place the deployed cutoff lives.
+"""The reward and settled scan windows — their single source of truth.
+
+``REWARD_START`` / ``REWARD_END`` are the hard, exclusive-output boundary:
+history outside calendar year 2026 may be scanned to reconstruct opening state,
+but it must never produce a reward amount or appear in a reward rollup.
 
 ``DEFAULT_END`` is EXCLUSIVE: events on/after it are out of the settled
 window. ``LAST_SETTLED_DAY`` is the INCLUSIVE calendar day every daily series
@@ -13,6 +17,12 @@ workbook (its month range derives from here). The Skybase reconciliation is
 deliberately frozen at its paid scope and does NOT track this window.
 """
 from datetime import date, datetime, timedelta, timezone
+
+# Reward amounts are deliberately limited to calendar year 2026. Keep this
+# independent from DEFAULT_END: the deployed scan cutoff can move without
+# silently expanding the authorized reward period.
+REWARD_START = date(2026, 1, 1)
+REWARD_END = date(2027, 1, 1)
 
 # Deployed cutoff: events on/after 2026-09-01 are out of the settled window.
 DEFAULT_END = date(2026, 9, 1)

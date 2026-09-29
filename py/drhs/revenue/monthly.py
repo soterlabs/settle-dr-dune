@@ -27,6 +27,7 @@ from calendar import monthrange
 
 import pandas as pd
 
+from ..window import REWARD_END, REWARD_START
 from . import rates
 
 # psm3 code-0 -> 10001 address lists (else 10000), per chain. Lower-cased.
@@ -69,6 +70,7 @@ SP_UNTAGGED = {"spUSDC": 131, "spUSDT": 130, "spPYUSD": 132}
 # Caveat to resolve with ops: 99 mirrors Spark's "house / untagged" bucket —
 # if Spark's payable claim ever includes it, it moves out of this set too.
 NON_PAYABLE_CODES = frozenset({-999999, 99, 127, 10000, 10001})
+MONTHLY_COLUMNS = ["month", "blockchain", "token", "ref_code", "dr_usd"]
 
 
 def _month(dt_s: str) -> str:
@@ -113,9 +115,19 @@ def monthly_dr(
     ``sp_deployment`` present => sp* reward rules; keyed (chain, symbol, dt_str).
     """
     if twa.empty:
-        return pd.DataFrame(columns=["month", "blockchain", "token", "ref_code", "dr_usd"])
+        return pd.DataFrame(columns=MONTHLY_COLUMNS)
     df = twa[twa["time_weighted_avg_balance"] > 0].copy()
-    from ..sources.skybase import BY_CODE, REWARD_END, REWARD_START
+    df["dt_s"] = df["dt"].astype(str).str[:10]
+    # Sources intentionally scan earlier history to reconstruct opening
+    # balances. Rewarding that history is a separate concern: every source,
+    # including future ones wired through this shared calculator, is hard
+    # limited to calendar year 2026.
+    df = df[(df["dt_s"] >= REWARD_START.isoformat())
+            & (df["dt_s"] < REWARD_END.isoformat())].copy()
+    if df.empty:
+        return pd.DataFrame(columns=MONTHLY_COLUMNS)
+
+    from ..sources.skybase import BY_CODE
     for code, target in BY_CODE.items():
         reserved = df[df.ref_code == code]
         if not reserved.empty and not (
@@ -125,11 +137,6 @@ def monthly_dr(
             & (reserved.symbol == target.symbol)
         ).all():
             raise ValueError(f"Skybase synthetic code {code} collides with another venue")
-    df["dt_s"] = df["dt"].astype(str).str[:10]
-    skybase = df["ref_code"].isin(BY_CODE)
-    in_skybase_window = ((df["dt_s"] >= REWARD_START.isoformat())
-                         & (df["dt_s"] < REWARD_END.isoformat()))
-    df = df[~skybase | in_skybase_window].copy()
     df["ref2"] = [reclassify(s, int(r), u, c)
                   for s, r, u, c in zip(df["symbol"], df["ref_code"], df["user_addr"], df["blockchain"])]
 
