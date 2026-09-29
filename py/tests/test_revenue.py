@@ -95,6 +95,14 @@ def test_final_combine_rejects_stale_non_2026_checkpoint_rows():
         pipeline.combine({"stale_source": stale})
 
 
+def test_final_combine_accepts_all_empty_2026_result():
+    out = pipeline.combine({"empty_source": pd.DataFrame(columns=monthly.MONTHLY_COLUMNS)})
+    assert set(out) == {
+        "dr_monthly_combined", "dr_rollup_by_refcode", "dr_rollup_by_refcode_token",
+    }
+    assert all(df.empty for df in out.values())
+
+
 def test_sp_reclass_and_speth_zero():
     twa = pd.DataFrame([
         {"blockchain": "ethereum", "contract_address": "0xa", "symbol": "spUSDT",

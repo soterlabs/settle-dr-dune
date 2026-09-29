@@ -95,6 +95,12 @@ def combine(monthly_by_source: dict[str, pd.DataFrame]) -> dict[str, pd.DataFram
                 f"{src} contains reward months outside calendar year 2026: {bad}. "
                 "Recompute stale checkpoints with --fresh.")
         frames.append(df.assign(source=src))
+    if not frames:
+        return {
+            "dr_monthly_combined": pd.DataFrame(columns=monthly.MONTHLY_COLUMNS + ["source"]),
+            "dr_rollup_by_refcode": pd.DataFrame(columns=["ref_code", "total"]),
+            "dr_rollup_by_refcode_token": pd.DataFrame(columns=["ref_code", "token", "total"]),
+        }
     combined = pd.concat(frames, ignore_index=True)
 
     def _pivot(keys: list[str]) -> pd.DataFrame:
