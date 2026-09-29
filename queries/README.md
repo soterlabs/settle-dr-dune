@@ -35,7 +35,7 @@ Every query emits exactly these columns (matching `dune.sparkdotfi.result_spark_
 | [`twa_susds_susdc_erc4626.sql`](twa_susds_susdc_erc4626.sql) | A | ERC4626 `Transfer` (balance) + separate `Referral` event matched by tx_hash (ref_code) | sUSDS eth; sUSDC eth/base/arbitrum/optimism/unichain |
 | [`twa_stusds.sql`](twa_stusds.sql) | B | Same as A (this *is* the reference) | stUSDS eth |
 | [`twa_susds_psm3_l2.sql`](twa_susds_psm3_l2.sql) | C | L2 sUSDS `Transfer` (balance) + PSM3 `Swap.referralCode` matched by tx_hash (ref_code) | sUSDS base/arbitrum/optimism/unichain |
-| [`twa_usds_staking_farms.sql`](twa_usds_staking_farms.sql) | D | SNX `StakingRewards`: `Staked`/`Withdrawn` (balance) + `Referral` event (ref_code) | USDS Sky Farm / Spk Farm / Chronicle (eth) |
+| [`twa_usds_staking_farms.sql`](twa_usds_staking_farms.sql) | D | SNX `StakingRewards`: `Staked`/`Withdrawn` (balance) + `Referral` event (ref_code) | USDS Sky Farm / Spk Farm / Chronicle / Grove (eth) |
 | [`twa_sp_vaults.sql`](twa_sp_vaults.sql) | E | Same as A; deployment ratio applied downstream | spUSDC eth+avalanche, spUSDT eth, spPYUSD eth, spETH eth |
 
 **Correction vs. the original plan note:** Templates A and B are the *same* structure. Per the official Spark docs, sUSDS/sUSDC do not embed the referral in the ERC4626 `Deposit` event; they emit a separate `Referral(uint16 indexed referral, address indexed owner, uint256 assets, uint256 shares)` event — exactly like stUSDS. So the `ref_code` is sourced from a `*_evt_referral` table matched on `tx_hash` + `owner`, not from a deposit parameter.
@@ -151,13 +151,14 @@ were verified"). The event table is `<decoded table>_evt_<event>` (lowercased).
 | USDS (Sky Farm) | ethereum | `0x0650CAF159C5A49f711e8169D4336ECB9b950275` | 18 | D | `sky_ethereum.stakingrewards` |
 | USDS (Spk Farm) | ethereum | `0x173e314C7635B45322cd8Cb14f44b312e079F3af` | 18 | D | `sky_ethereum.stakingrewards` |
 | USDS (Chronicle) | ethereum | `0x10ab606b067c9c461d8893c47c7512472e19e2ce` | 18 | D | `sky_ethereum.stakingrewards` |
+| USDS (Grove Farm) | ethereum | `0x4E41488C19cD35EB4de3083Fc3e204854c75c86a` | 18 | D | `sky_ethereum.stakingrewards` |
 | spUSDC | ethereum | `0x28B3a8fb53B741A8Fd78c0fb9A6B2393d896a43d` | 6 | E | `spark_protocol_ethereum.sparkvault` |
 | spUSDC | avalanche_c | `0x28B3a8fb53B741A8Fd78c0fb9A6B2393d896a43d` | 6 | E | `spark_protocol_avalanche_c.sparkvault` |
 | spUSDT | ethereum | `0xe2e7a17dFf93280dec073C995595155283e3C372` | 6 | E | `spark_protocol_ethereum.sparkvault` |
 | spPYUSD | ethereum | `0x80128DbB9f07b93DDE62A6daeadb69ED14a7D354` | 6 | E | `spark_protocol_ethereum.sparkvault` |
 | spETH | ethereum | `0xfE6eb3b609a7C8352A241f7F3A21CEA4e9209B8f` | 18 | E | `spark_protocol_ethereum.sparkvault` |
 
-> **Note on naming:** the three USDS farms and the four sp* vaults each share one
+> **Note on naming:** the four USDS farms and the four sp* vaults each share one
 > bytecode, so Dune exposes a **single** decoded table per chain
 > (`stakingrewards`, `sparkvault`) — rows are separated by `contract_address`.
 > PSM3 also has a unified `spark_protocol_multichain.psm3_evt_swap` (carries a

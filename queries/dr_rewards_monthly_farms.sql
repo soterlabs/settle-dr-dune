@@ -1,5 +1,5 @@
 -- =============================================================================
--- DR revenue (MONTHLY) — USDS staking farms (Sky / Spk / Chronicle, Ethereum)
+-- DR revenue (MONTHLY) — USDS staking farms (Sky / Spk / Chronicle / Grove, Ethereum)
 -- -----------------------------------------------------------------------------
 -- Per-source DR-revenue query (see dr_rewards_monthly_susds_susdc.sql for the
 -- overall split rationale). References exactly one foundational TWA query.

@@ -57,7 +57,7 @@ def eligibility(code: int) -> tuple[str, str | None]:
     return ELIGIBILITY_OVERRIDES.get(code, (ELIGIBILITY_DEFAULT_START, None))
 
 NOTES = {
-    -999999: "Synthetic code: Untagged USDS-CLE, USDS-SKY, USDS-SPK, stUSDS.",
+    -999999: "Synthetic code: Untagged USDS-CLE, USDS-SKY, USDS-SPK, USDS-GROVE, stUSDS.",
     0: "Explicit on-chain referral on Ethereum. L2 sUSDS split to 10000/10001.",
     99: "Synthetic code: Untagged sUSDS.",
     127: "Synthetic code: untagged sUSDC",

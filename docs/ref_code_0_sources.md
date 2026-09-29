@@ -55,7 +55,7 @@ This is the common path and exists for every non-PSM3 source:
 | sUSDC (eth) | `sky_ethereum.usdcvault_evt_referral` | `owner` | same | same |
 | sUSDC (base/arb/op/uni) | `sky_<chain>.usdcvaultl2_evt_referral` | `owner` | same | same |
 | stUSDS (eth) | `sky_ethereum.stusds_evt_referral` | `owner` | `twa_stusds.sql` (query_7877544) | `dr_rewards_monthly_stusds.sql` (7877553) |
-| USDS-SKY / USDS-SPK / USDS-CLE (eth) | `sky_ethereum.stakingrewards_evt_referral` | `user` | `twa_usds_staking_farms.sql` (query_7877545) | `dr_rewards_monthly_farms.sql` (7877554) |
+| USDS-SKY / USDS-SPK / USDS-CLE / USDS-GROVE (eth) | `sky_ethereum.stakingrewards_evt_referral` | `user` | `twa_usds_staking_farms.sql` (query_7877545) | `dr_rewards_monthly_farms.sql` (7877554) |
 | spUSDC / spUSDT / spPYUSD / spETH (eth) + spUSDC (avax) | `spark_protocol_<chain>.sparkvault_evt_referral` | `owner` | `twa_sp_vaults.sql` (query_7877546) | `dr_rewards_monthly_sp.sql` (7877555) |
 
 > Note: a frontend that passes `0` when the user has no referral will produce
@@ -161,7 +161,7 @@ filter these addresses.
 | ERC4626 vault + separate `Referral` event (Template A) | sUSDS, sUSDC (eth + L2) | A |
 | ERC4626 Spark vault + `Referral` event (Template E) | spUSDC, spUSDT, spPYUSD, spETH | A |
 | ERC4626 stUSDS + `Referral` event (Template B) | stUSDS | A |
-| Synthetix staking farm + `Referral` wrapper (Template D) | USDS-SKY, USDS-SPK, USDS-CLE | A |
+| Synthetix staking farm + `Referral` wrapper (Template D) | USDS-SKY, USDS-SPK, USDS-CLE, USDS-GROVE | A |
 | PSM3 L2 swap, inline `referralCode` (Template C) | L2 sUSDS | C |
 
 > All non-PSM3 sources now share the same attribution shape: balance from

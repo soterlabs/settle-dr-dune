@@ -1,6 +1,6 @@
 -- =============================================================================
 -- Template D: USDS Token Rewards Contracts per-user daily TWA
---             (Sky Farm, Spk Farm, Chronicle) on Ethereum
+--             (Sky Farm, Spk Farm, Chronicle, Grove Farm) on Ethereum
 -- -----------------------------------------------------------------------------
 -- These are Synthetix-style `StakingRewards` clones with a referral-emitting
 -- wrapper. Unlike the ERC4626 vaults, balance is NOT tracked from share
@@ -10,21 +10,21 @@
 -- ref_code comes from the wrapper's `Referral` event (referral + owner),
 -- matched by (tx_hash, user) and forward-filled (last-referral-wins).
 --
--- The three farms share the same event signatures; we read each event type once
+-- The four farms share the same event signatures; we read each event type once
 -- and distinguish farms by contract_address via the token_targets join.
 --
--- Output symbol distinguishes the farms (USDS-SKY / USDS-SPK / USDS-CLE) so the
--- downstream aggregator can map them (Dune uses USDS-SKY/USDS-SPK; Chronicle is
--- not in Dune at all). Untagged stays -999999 here (Amatsu maps these to 127
+-- Output symbol distinguishes the farms (USDS-SKY / USDS-SPK / USDS-CLE /
+-- USDS-GROVE) so the downstream aggregator can map them. Untagged stays
+-- -999999 here (Amatsu maps these to 127
 -- downstream — see queries/README.md).
 --
 -- TABLE NAMES (verified against Dune <chain>.contracts + information_schema, 2026-06):
--- All three contracts share the decoded contract "StakingRewards", so they live in
+-- All four contracts share the decoded contract "StakingRewards", so they live in
 -- ONE set of tables, distinguished by contract_address:
 --   sky_ethereum.stakingrewards_evt_{staked,withdrawn,referral}
 -- (Confirmed events present: staked, withdrawn, referral, rewardpaid, rewardadded, …)
 -- PARAMETERS:
---   {{end_date}} (date) - scan cutoff, exclusive. Start is hardcoded to 2024-09-01.
+--   {{end_date}} (date) - scan cutoff, exclusive. Start is per target above.
 --   Lower {{end_date}} (e.g. 2025-01-01) for a cheap, window-capped run;
 --   default 2030-01-01 = full history. The cutoff is applied at the leaf event
 --   scan so it actually reduces bytes scanned / cost.
@@ -34,7 +34,8 @@ with
         values
             ('ethereum', 'USDS-SKY', 0x0650CAF159C5A49f711e8169D4336ECB9b950275, 18, date '2024-09-01'), -- Sky Farm (USDS -> SKY)
             ('ethereum', 'USDS-SPK', 0x173e314C7635B45322cd8Cb14f44b312e079F3af, 18, date '2024-09-01'), -- Spk Farm (USDS -> SPK)
-            ('ethereum', 'USDS-CLE', 0x10ab606b067c9c461d8893c47c7512472e19e2ce, 18, date '2024-09-01')  -- Chronicle (USDS -> CLE points)
+            ('ethereum', 'USDS-CLE', 0x10ab606b067c9c461d8893c47c7512472e19e2ce, 18, date '2024-09-01'), -- Chronicle (USDS -> CLE points)
+            ('ethereum', 'USDS-GROVE', 0x4E41488C19cD35EB4de3083Fc3e204854c75c86a, 18, date '2026-06-01') -- Grove Farm (USDS -> GROVE)
     ),
 
     -- -------------------------------------------------------------------------

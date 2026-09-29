@@ -10,7 +10,7 @@ actually tracked, what we found, and the fix for the one that was not.
 ## Census (every tracked contract, events since 2026-01-01)
 
 Scanned: `Referral` on sUSDS-eth, stUSDS, sUSDC ×5 chains, sp\* ×5; farm
-`Referral` on the three USDS farms; PSM3 `Swap` (assetOut = sUSDS) on base /
+`Referral` on the four USDS farms (including Grove); PSM3 `Swap` (assetOut = sUSDS) on base /
 arbitrum / optimism / unichain. Every 3xxx code that appears anywhere:
 
 | code | events | owners | first → last | where | on Osero's list | in settled outputs |

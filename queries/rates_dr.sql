@@ -15,7 +15,8 @@
 --
 -- token -> reward_code mapping (applied downstream in dr_rewards_daily.sql):
 --   stUSDS                                  -> XR-stUSDS
---   sUSDS, USDS-SKY, USDS-SPK, USDS-CLE     -> XR
+--   sUSDS, USDS-SKY, USDS-SPK, USDS-CLE,
+--   USDS-GROVE                               -> XR
 --   sUSDC                                   -> XR  (boosted; see note below)
 --   spUSDC, spUSDT, spPYUSD, spETH          -> XR*
 --
@@ -28,8 +29,8 @@
 with
     reward_rates (reward_code, reward_description, reward_per_apy, start_dt, end_dt) as (
         values
-            ('XR',        'Accessibility Rewards (sUSDS/USDS-SKY/USDS-SPK)',                0.006, date '2024-01-01', date '2025-12-31'),
-            ('XR',        'Accessibility Rewards (sUSDS/USDS-SKY/USDS-SPK)',                0.005, date '2026-01-01', date '2030-12-31'),
+            ('XR',        'Accessibility Rewards (sUSDS/USDS farms)',                       0.006, date '2024-01-01', date '2025-12-31'),
+            ('XR',        'Accessibility Rewards (sUSDS/USDS farms)',                       0.005, date '2026-01-01', date '2030-12-31'),
             ('XR-stUSDS', 'Accessibility Rewards (stUSDS)',                                 0.006, date '2024-01-01', date '2025-12-31'),
             ('XR-stUSDS', 'Accessibility Rewards (stUSDS)',                                 0.001, date '2026-01-01', date '2030-12-31'),
             ('XR*',       'Accessibility Rewards Alternative (spUSDC/spUSDT/spPYUSD/spETH)', 0.006, date '2024-01-01', date '2025-12-31'),
