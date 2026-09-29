@@ -25,7 +25,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2024-10-01,ethereum,sUSDS,1001,2900.577229412233,susds_susdc
 2024-10-01,ethereum,sUSDS,1002,807.5958288356111,susds_susdc
 2024-10-01,ethereum,sUSDS,1003,2303.515628459741,susds_susdc
-2024-10-01,ethereum,sUSDS,1997,300.80803836712374,skybase_pendle
 2024-10-01,ethereum,sUSDS,13425,0.1431066418942096,susds_susdc
 2024-11-01,base,sUSDS,99,2149.5018250069875,psm3
 2024-11-01,base,sUSDS,128,55.8942883229365,psm3
@@ -49,7 +48,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2024-11-01,ethereum,sUSDS,1002,1255.4545788614716,susds_susdc
 2024-11-01,ethereum,sUSDS,1003,5561.847535609686,susds_susdc
 2024-11-01,ethereum,sUSDS,1004,0.0322926319932939,susds_susdc
-2024-11-01,ethereum,sUSDS,1997,197.70482128544543,skybase_pendle
 2024-11-01,ethereum,sUSDS,13425,0.1761224427674841,susds_susdc
 2024-12-01,base,sUSDS,1,0.0003645113459576804,psm3
 2024-12-01,base,sUSDS,99,49083.48438506656,psm3
@@ -75,7 +73,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2024-12-01,ethereum,sUSDS,1002,1126.5717760170342,susds_susdc
 2024-12-01,ethereum,sUSDS,1003,10601.852982755388,susds_susdc
 2024-12-01,ethereum,sUSDS,1004,522.5669524273511,susds_susdc
-2024-12-01,ethereum,sUSDS,1997,156.26401169155366,skybase_pendle
 2024-12-01,ethereum,sUSDS,13425,0.1833913609481262,susds_susdc
 2025-01-01,base,sUSDS,1,469.17227031033786,psm3
 2025-01-01,base,sUSDS,2,4.1780341915700136e-19,psm3
@@ -107,7 +104,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2025-01-01,ethereum,sUSDS,1003,19684.17126843973,susds_susdc
 2025-01-01,ethereum,sUSDS,1004,1247.799401598592,susds_susdc
 2025-01-01,ethereum,sUSDS,1015,7.058758855491912,susds_susdc
-2025-01-01,ethereum,sUSDS,1997,154.43726678030666,skybase_pendle
 2025-01-01,ethereum,sUSDS,13425,0.185223327709338,susds_susdc
 2025-02-01,arbitrum,sUSDS,99,7234.4888124699,psm3
 2025-02-01,base,sUSDS,1,4723.919137129457,psm3
@@ -140,7 +136,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2025-02-01,ethereum,sUSDS,1003,35678.96909762169,susds_susdc
 2025-02-01,ethereum,sUSDS,1004,1444.6180795212215,susds_susdc
 2025-02-01,ethereum,sUSDS,1015,43.30769383460287,susds_susdc
-2025-02-01,ethereum,sUSDS,1997,149.31972376713134,skybase_pendle
 2025-02-01,ethereum,sUSDS,13425,0.1687944842289215,susds_susdc
 2025-03-01,arbitrum,sUSDC,127,0.842204262049027,susds_susdc
 2025-03-01,arbitrum,sUSDC,128,1280.202542539466,susds_susdc
@@ -189,7 +184,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2025-03-01,ethereum,sUSDS,1003,45665.240847742105,susds_susdc
 2025-03-01,ethereum,sUSDS,1004,1754.3513075988906,susds_susdc
 2025-03-01,ethereum,sUSDS,1015,39.54908514910597,susds_susdc
-2025-03-01,ethereum,sUSDS,1997,138.39377242470482,skybase_pendle
 2025-03-01,ethereum,sUSDS,13425,0.1879513339398397,susds_susdc
 2025-04-01,arbitrum,sUSDC,127,1.49021923790058,susds_susdc
 2025-04-01,arbitrum,sUSDC,128,3393.1074815328666,susds_susdc
@@ -240,7 +234,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2025-04-01,ethereum,sUSDS,1003,46348.97837561866,susds_susdc
 2025-04-01,ethereum,sUSDS,1004,2845.7489451371584,susds_susdc
 2025-04-01,ethereum,sUSDS,1015,1.4912489860248831e-05,susds_susdc
-2025-04-01,ethereum,sUSDS,1997,16.725188007733127,skybase_pendle
 2025-04-01,ethereum,sUSDS,13425,0.1826399898277502,susds_susdc
 2025-05-01,arbitrum,sUSDC,127,191.7106194694881,susds_susdc
 2025-05-01,arbitrum,sUSDC,128,5094.781628519368,susds_susdc
@@ -301,7 +294,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2025-05-01,ethereum,sUSDS,1003,59831.50294472536,susds_susdc
 2025-05-01,ethereum,sUSDS,1004,2087.1101057148667,susds_susdc
 2025-05-01,ethereum,sUSDS,1015,1.5466361002069913e-05,susds_susdc
-2025-05-01,ethereum,sUSDS,1997,10.023235018213564,skybase_pendle
 2025-05-01,ethereum,sUSDS,13425,0.1005324523536947,susds_susdc
 2025-06-01,arbitrum,sUSDC,127,321.6822060374422,susds_susdc
 2025-06-01,arbitrum,sUSDC,128,8477.639515718716,susds_susdc
@@ -368,7 +360,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2025-06-01,ethereum,sUSDS,1004,2009.525955868373,susds_susdc
 2025-06-01,ethereum,sUSDS,1007,438.91654901332527,susds_susdc
 2025-06-01,ethereum,sUSDS,1015,1.5022602133920532e-05,susds_susdc
-2025-06-01,ethereum,sUSDS,1997,8.967148419076839,skybase_pendle
 2025-06-01,ethereum,sUSDS,13425,0.0001889072442534,susds_susdc
 2025-06-01,optimism,sUSDC,127,204.52911354814364,susds_susdc
 2025-06-01,optimism,sUSDC,128,21774.09365288129,susds_susdc
@@ -455,7 +446,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2025-07-01,ethereum,sUSDS,1004,3560.8969508766745,susds_susdc
 2025-07-01,ethereum,sUSDS,1007,641.5532221354046,susds_susdc
 2025-07-01,ethereum,sUSDS,1015,1.558055677045733e-05,susds_susdc
-2025-07-01,ethereum,sUSDS,1997,8.912793568136445,skybase_pendle
 2025-07-01,ethereum,sUSDS,13425,0.0001959234503585,susds_susdc
 2025-07-01,optimism,sUSDC,127,125.70784844961732,susds_susdc
 2025-07-01,optimism,sUSDC,128,10156.305880735708,susds_susdc
@@ -546,7 +536,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2025-08-01,ethereum,sUSDS,1004,1961.3726300082585,susds_susdc
 2025-08-01,ethereum,sUSDS,1007,188.1571656798052,susds_susdc
 2025-08-01,ethereum,sUSDS,1015,1.5640206398767014e-05,susds_susdc
-2025-08-01,ethereum,sUSDS,1997,8.937364988654359,skybase_pendle
 2025-08-01,ethereum,sUSDS,13425,0.0001966735365822,susds_susdc
 2025-08-01,optimism,sUSDC,127,6.242705491641331,susds_susdc
 2025-08-01,optimism,sUSDC,128,16886.92716570915,susds_susdc
@@ -637,7 +626,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2025-09-01,ethereum,sUSDS,1004,2407.6054634324178,susds_susdc
 2025-09-01,ethereum,sUSDS,1007,750.8835034204911,susds_susdc
 2025-09-01,ethereum,sUSDS,1015,1.519447304481567e-05,susds_susdc
-2025-09-01,ethereum,sUSDS,1997,4.376165615994683,skybase_pendle
 2025-09-01,ethereum,sUSDS,13425,0.0001910684983327,susds_susdc
 2025-09-01,optimism,sUSDC,127,9.38391743651062,susds_susdc
 2025-09-01,optimism,sUSDC,128,30174.84780892159,susds_susdc
@@ -738,7 +726,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2025-10-01,ethereum,sUSDS,1007,2441.8810718844834,susds_susdc
 2025-10-01,ethereum,sUSDS,1015,1.5761920682917065e-05,susds_susdc
 2025-10-01,ethereum,sUSDS,1017,0.0178827398118499,susds_susdc
-2025-10-01,ethereum,sUSDS,1997,0.3286696536304232,skybase_pendle
 2025-10-01,ethereum,sUSDS,13425,0.0001982040776828,susds_susdc
 2025-10-01,ethereum,spETH,-999999,0.0,sp
 2025-10-01,ethereum,spETH,128,0.0,sp
@@ -854,7 +841,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2025-11-01,ethereum,sUSDS,1004,1540.3776603997917,susds_susdc
 2025-11-01,ethereum,sUSDS,1007,862.2541941247569,susds_susdc
 2025-11-01,ethereum,sUSDS,1015,1.5310498330077433e-05,susds_susdc
-2025-11-01,ethereum,sUSDS,1997,0.3295678089045515,skybase_pendle
 2025-11-01,ethereum,sUSDS,13425,0.0001925275010213,susds_susdc
 2025-11-01,ethereum,spETH,-999999,0.0,sp
 2025-11-01,ethereum,spETH,128,0.0,sp
@@ -980,7 +966,6 @@ month,blockchain,token,ref_code,dr_usd,source
 2025-12-01,ethereum,sUSDS,1007,1879.538861816323,susds_susdc
 2025-12-01,ethereum,sUSDS,1015,1.5877105585390156e-05,susds_susdc
 2025-12-01,ethereum,sUSDS,1017,0.0079656813506977,susds_susdc
-2025-12-01,ethereum,sUSDS,1997,0.330739718172114,skybase_pendle
 2025-12-01,ethereum,sUSDS,13425,0.0001996525126685,susds_susdc
 2025-12-01,ethereum,spETH,-999999,0.0,sp
 2025-12-01,ethereum,spETH,128,0.0,sp

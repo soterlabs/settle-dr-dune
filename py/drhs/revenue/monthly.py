@@ -115,7 +115,7 @@ def monthly_dr(
     if twa.empty:
         return pd.DataFrame(columns=["month", "blockchain", "token", "ref_code", "dr_usd"])
     df = twa[twa["time_weighted_avg_balance"] > 0].copy()
-    from ..sources.skybase import BY_CODE
+    from ..sources.skybase import BY_CODE, REWARD_END, REWARD_START
     for code, target in BY_CODE.items():
         reserved = df[df.ref_code == code]
         if not reserved.empty and not (
@@ -126,6 +126,10 @@ def monthly_dr(
         ).all():
             raise ValueError(f"Skybase synthetic code {code} collides with another venue")
     df["dt_s"] = df["dt"].astype(str).str[:10]
+    skybase = df["ref_code"].isin(BY_CODE)
+    in_skybase_window = ((df["dt_s"] >= REWARD_START.isoformat())
+                         & (df["dt_s"] < REWARD_END.isoformat()))
+    df = df[~skybase | in_skybase_window].copy()
     df["ref2"] = [reclassify(s, int(r), u, c)
                   for s, r, u, c in zip(df["symbol"], df["ref_code"], df["user_addr"], df["blockchain"])]
 

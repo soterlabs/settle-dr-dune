@@ -182,8 +182,7 @@ rows.append(["SYNTHETIC & UNPAID (tracked, no beneficiary — notional dr_usd; "
 rows.extend(nonpay_rows)
 write_aoa("Payable by Ref Code", rows)
 
-# Newly onboarded venues: historical accrual additions, not a payment ledger.
-# Keep pre-2026 history visible but outside the default payable window.
+# Newly onboarded venues: 2026 historical accrual additions, not a payment ledger.
 from drhs.sources.skybase import BY_CODE as SKYBASE_CODES  # noqa: E402
 _new = (df[df.ref_code.isin(SKYBASE_CODES)]
         .groupby(["month_s", "ref_code", "source"])["dr_usd"].sum().reset_index())

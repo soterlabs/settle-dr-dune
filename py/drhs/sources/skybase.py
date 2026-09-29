@@ -22,7 +22,11 @@ from .custody import MORPHO_BLUE, CREATE_MARKET_TOPIC0
 
 LOG = logging.getLogger(__name__)
 GENESIS = 18_800_000  # before Morpho deployment, USDS, SY and both vaults
+REWARD_START = date(2026, 1, 1)
+REWARD_END = date(2027, 1, 1)
 SUSDS = "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd"
+# Fetch pre-2026 history to reconstruct the opening balances exactly; the
+# monthly calculator restricts rewards to [REWARD_START, REWARD_END).
 PENDLE = holder.HolderTarget("ethereum", "sUSDS", SUSDS,
     "0xbe3d4ec488a0a042bb86f9176c24f8cd54018ba7", 1997, 18, date(2024, 9, 1))
 FLAGSHIP = holder.HolderTarget("ethereum", "USDS", holder.USDS,

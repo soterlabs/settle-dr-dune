@@ -108,6 +108,16 @@ def test_pendle_conversion_and_reserved_code_collision():
     with pytest.raises(ValueError,match='collides'):
         monthly.monthly_dr(tw,reclassify=monthly.reclass_none,conv_lookup=monthly.const_conv)
 
+def test_skybase_rewards_are_restricted_to_2026():
+    rows = []
+    for dt in (date(2025, 12, 31), date(2026, 1, 1), date(2026, 12, 31), date(2027, 1, 1)):
+        rows.append(dict(blockchain='ethereum', contract_address=s.SUSDS,
+            symbol='sUSDS', user_addr=s.PENDLE.holder, dt=dt, ref_code=1997,
+            time_weighted_avg_balance=12000))
+    out = monthly.monthly_dr(pd.DataFrame(rows), reclassify=monthly.reclass_none,
+                             conv_lookup=monthly.const_conv)
+    assert list(out.month) == ['2026-01-01', '2026-12-01']
+
 def test_collateral_events_do_not_add_cash_and_duplicate_logs_are_deduped():
     rs=[row(s.SUPPLY,[100,100]),row(s.ALLOCATE,[0,100],idx=1,addr=A)]
     duplicate=rs[0]

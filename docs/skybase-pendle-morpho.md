@@ -94,12 +94,12 @@ Deposit/Withdraw rate of each day, forward-filled). This is a daily valuation
 approximation, not an exact continuous integral of share balance times price.
 Morpho balances are already USDS. All balance durations are intraday weighted.
 
-History is computed from deployment, including pre-2026 Pendle amounts. The
-workbook's existing payment eligibility starts in **January 2026**; earlier
-accrual remains visible in the full-history token tab, excluded from payable.
-The new 2026 amounts are historical additions for the next cycle's true-up
-review, not a record of transfers already paid. No payment is executed by this
-change, and the frozen Skybase payment reconciliation is not rewritten.
+Contract state is replayed from deployment so the January 1 opening balances
+are exact, but rewards are calculated **only for calendar year 2026**. No
+pre-2026 or post-2026 Skybase reward rows are emitted. The 2026 amounts are
+historical additions for the next cycle's true-up review, not a record of
+transfers already paid. No payment is executed by this change, and the frozen
+Skybase payment reconciliation is not rewritten.
 
 ## Run and verify
 
@@ -120,7 +120,8 @@ Production computation remains HyperSync-only.
 
 ## Validation and accrual additions (2026-09-15)
 
-- Full offline suite after rebasing onto PR #19: **132 passed**, including the new shared-market,
+- Full offline suite after rebasing onto the post-Grove main branch: **135
+  passed**, including the new shared-market,
   outside-lender, fee-dilution, borrow, liquidation, burned-share, wallet
   relocation, referral-collision and SY reconciliation cases.
 - At block **25878704** (last block before 2026-09-01), replay equals RPC
@@ -148,8 +149,7 @@ Production computation remains HyperSync-only.
 | Total | 62,728.16 |
 
 The workbook's **Skybase Historical Additions** tab and
-`hypersync-results/skybase_historical_additions.csv` provide the per-month
-breakdown. Pre-2026 Pendle accrual of 1,155.86 USDS is separately visible and
-excluded from the default payable view. These are accrual additions for the
-next cycle's reconciliation; independently confirm any payments already made
-outside this calculation before using them as transfer amounts.
+`hypersync-results/skybase_historical_additions.csv` provide the 2026 per-month
+breakdown. These are accrual additions for the next cycle's reconciliation;
+independently confirm any payments already made outside this calculation
+before using them as transfer amounts.
