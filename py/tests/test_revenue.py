@@ -19,7 +19,8 @@ import pytest
 ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT / "py"))
 
-from drhs.revenue import monthly, rates  # noqa: E402
+from drhs.revenue import monthly, pipeline, rates  # noqa: E402
+from drhs.window import REWARD_END, REWARD_START  # noqa: E402
 
 # reward_per values locked from the Dune 7877547 diff (all matched exactly).
 LOCKED = {
@@ -69,6 +70,37 @@ def test_monthly_reclass_and_formula():
     assert out.loc[5, "dr_usd"] == pytest.approx(100.0 / 365 * rp * 2.0, rel=1e-12)
     # ref 99 gets two days (Feb 1 + Feb 2)
     assert out.loc[99, "dr_usd"] == pytest.approx(2 * (100.0 / 365 * rp * 2.0), rel=1e-12)
+
+
+def test_all_reward_sources_are_restricted_to_calendar_2026():
+    """Historical state rows may exist, but only 2026 can earn a reward."""
+    twa = pd.DataFrame([
+        {"blockchain": "ethereum", "contract_address": "0xt", "symbol": "USDS",
+         "user_addr": "0xu", "dt": dt, "ref_code": 5,
+         "time_weighted_avg_balance": 100.0}
+        for dt in ("2025-12-31", "2026-01-01", "2026-12-31", "2027-01-01")
+    ])
+    out = monthly.monthly_dr(twa, reclassify=monthly.reclass_none,
+                             conv_lookup=monthly.const_conv)
+    assert (REWARD_START, REWARD_END) == (date(2026, 1, 1), date(2027, 1, 1))
+    assert list(out["month"]) == ["2026-01-01", "2026-12-01"]
+
+
+def test_final_combine_rejects_stale_non_2026_checkpoint_rows():
+    stale = pd.DataFrame([{
+        "month": "2025-12-01", "blockchain": "ethereum", "token": "USDS",
+        "ref_code": 5, "dr_usd": 1.0,
+    }])
+    with pytest.raises(ValueError, match="outside calendar year 2026"):
+        pipeline.combine({"stale_source": stale})
+
+
+def test_final_combine_accepts_all_empty_2026_result():
+    out = pipeline.combine({"empty_source": pd.DataFrame(columns=monthly.MONTHLY_COLUMNS)})
+    assert set(out) == {
+        "dr_monthly_combined", "dr_rollup_by_refcode", "dr_rollup_by_refcode_token",
+    }
+    assert all(df.empty for df in out.values())
 
 
 def test_sp_reclass_and_speth_zero():
