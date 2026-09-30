@@ -114,7 +114,8 @@ class EntrypointProgram:
         return SyntheticProgram(self.name, self.ref_code, frozenset(),
                                 start=self.start, end=self.end, txs=txs)
 
-    def resolve(self, target: "Target", from_block: int, to_block: int, end_ts: int
+    def resolve(self, target: "Target", from_block: int, to_block: int, end_ts: int,
+                scan_start: date | None = None,
                 ) -> "SyntheticProgram":
         """Fetch the target's Transfer rows WITH the transaction join over the
         program's eligibility window only, and resolve. A separate, bounded
@@ -362,6 +363,23 @@ REROUTE_START: dict[int, date] = {}
 SUSDC_REROUTED: frozenset[int] = frozenset({3006})
 
 
+def reroute_intermediaries(ref_rows, codes: frozenset[int], *,
+                           before_ts: int | None = None,
+                           min_owner_events: int = MIN_INTERMEDIARY_EVENTS) -> frozenset[str]:
+    """Owners classified as routers by the window-global event threshold."""
+    counts: dict[str, int] = {}
+    for r in ref_rows:
+        if before_ts is not None and r.block_time >= before_ts:
+            continue
+        if (events.referral_code_from_topic(r.topic1) not in codes
+                or r.transaction_hash is None):
+            continue
+        owner = events.topic_to_addr(r.topic2)
+        counts[owner] = counts.get(owner, 0) + 1
+    return frozenset(owner for owner, count in counts.items()
+                     if count >= min_owner_events)
+
+
 def rerouted_referrals(
     ref_rows, tr_rows, codes: frozenset[int],
     min_owner_events: int = MIN_INTERMEDIARY_EVENTS,
@@ -378,11 +396,8 @@ def rerouted_referrals(
     if not codes:
         return {}
     # 0. how often does each address own an allowlisted code? (intermediary test)
-    owner_events: dict[str, int] = {}
-    for r in ref_rows:
-        if events.referral_code_from_topic(r.topic1) in codes and r.transaction_hash is not None:
-            owner = events.topic_to_addr(r.topic2)
-            owner_events[owner] = owner_events.get(owner, 0) + 1
+    intermediaries = reroute_intermediaries(
+        ref_rows, codes, min_owner_events=min_owner_events)
 
     # 1. allowlisted referral events per tx: owner -> latest code by log_index
     owner_code: dict[str, dict[str, tuple[int, int]]] = {}   # tx -> owner -> (li, code)
@@ -394,7 +409,7 @@ def rerouted_referrals(
         if st is not None and datetime.fromtimestamp(r.block_time, tz=timezone.utc).date() < st:
             continue  # before the code's eligibility start — not re-routed
         owner = events.topic_to_addr(r.topic2)
-        if owner_events.get(owner, 0) < min_owner_events:
+        if owner not in intermediaries:
             continue  # likely an end user owning the code, not a router
         per_tx = owner_code.setdefault(r.transaction_hash, {})
         prev = per_tx.get(owner)
@@ -503,6 +518,7 @@ def build_legs(
     synthetic: tuple[SyntheticProgram, ...] = (),
     reroute: frozenset[int] = frozenset(),
     custody: tuple = (),
+    scan_start: date | None = None,
 ) -> pd.DataFrame:
     """Balance-change legs for ``targets``.
 
@@ -519,7 +535,8 @@ def build_legs(
     perimeters count a strategy's named Morpho position as still-held (see
     ``drhs.sources.custody``). All applied to every matching target.
     """
-    frames = [_legs_for_target(t, _end_ts(end_date), synthetic, reroute, custody)
+    frames = [_legs_for_target(t, _end_ts(end_date), synthetic, reroute, custody,
+                               scan_start)
               for t in targets]
     frames = [f for f in frames if not f.empty]
     if not frames:
@@ -533,28 +550,33 @@ def build_legs(
     return legs
 
 
-def target_block_range(t: Target, end_ts: int) -> tuple[int, int]:
+def target_block_range(
+    t: Target, end_ts: int, scan_start: date | None = None,
+) -> tuple[int, int]:
     """[from_block, to_block] of ``t``'s scan window. start_date (hardcoded
     2024-09-01) can precede an L2's genesis (e.g. unichain): scan from genesis
     — matches Dune, which simply finds no events before the chain existed."""
-    from_block = hypersync.block_at_or_genesis(t.blockchain, midnight_ts(t.start_date))
+    start = max(t.start_date, scan_start) if scan_start else t.start_date
+    from_block = hypersync.block_at_or_genesis(t.blockchain, midnight_ts(start))
     return from_block, hypersync.find_block_at_or_before(t.blockchain, end_ts - 1)
 
 
-def fetch_target_rows(t: Target, end_ts: int):
+def fetch_target_rows(t: Target, end_ts: int, scan_start: date | None = None):
     """Fetch the raw Referral + Transfer ``LogRow``s for ``t`` over the scan
     window. Split from the pure leg logic so fixtures can capture these rows
     and tests can replay ``legs_from_rows`` offline."""
-    ref_rows, tr_rows, _fb, _tb = fetch_target_rows_ranged(t, end_ts)
+    ref_rows, tr_rows, _fb, _tb = fetch_target_rows_ranged(t, end_ts, scan_start)
     return ref_rows, tr_rows
 
 
-def fetch_target_rows_ranged(t: Target, end_ts: int):
+def fetch_target_rows_ranged(
+    t: Target, end_ts: int, scan_start: date | None = None,
+):
     """``fetch_target_rows`` plus the [from_block, to_block] it scanned, so the
     custody / anchored-program fetches of the same target use the SAME window
     (a second block resolution could land on a different head)."""
     addr = t.address.lower()
-    from_block, to_block = target_block_range(t, end_ts)
+    from_block, to_block = target_block_range(t, end_ts, scan_start)
     ref_rows = hypersync.query_logs(
         t.blockchain, [{"address": [addr], "topics": [[events.REFERRAL_TOPIC0]]}],
         from_block, to_block,
@@ -684,8 +706,31 @@ def _legs_for_target(
     synthetic: tuple = (),
     reroute: frozenset[int] = frozenset(),
     custody: tuple = (),
+    scan_start: date | None = None,
 ) -> pd.DataFrame:
-    ref_rows, tr_rows, from_block, to_block = fetch_target_rows_ranged(t, end_ts)
+    ref_rows, tr_rows, from_block, to_block = fetch_target_rows_ranged(
+        t, end_ts, scan_start)
+    # Router classification is based on its all-history event count. Referral
+    # rows are small, so retain that history while the high-volume Transfer
+    # stream starts at the checkpoint. This preserves settled re-routing
+    # semantics without rereading millions of old transfers.
+    if scan_start is not None and reroute:
+        addr = t.address.lower()
+        history_from, _ = target_block_range(t, end_ts)
+        ref_rows = hypersync.query_logs(
+            t.blockchain,
+            [{"address": [addr], "topics": [[events.REFERRAL_TOPIC0]]}],
+            history_from, to_block,
+        ).rows
+        cutoff_ts = midnight_ts(scan_start)
+        before = reroute_intermediaries(ref_rows, reroute, before_ts=cutoff_ts)
+        through_end = reroute_intermediaries(ref_rows, reroute)
+        if before != through_end:
+            changed = sorted(through_end.symmetric_difference(before))
+            from ..state_checkpoint import FullReplayRequired
+            raise FullReplayRequired(
+                "reroute intermediary classification changed after checkpoint: "
+                + ", ".join(changed))
     # anchored programs (lifi.IntegratorProgram, EntrypointProgram) resolve per
     # target — each fetches its own bounded anchor data — into a concrete
     # SyntheticProgram (tx set + delivery contracts).
@@ -697,9 +742,14 @@ def _legs_for_target(
             if p.blockchain == t.blockchain and p.token == t.address.lower():
                 custody_rows.append((p, custody_mod.fetch_position_rows(p, from_block, to_block)))
     if unresolved:
-        synthetic = tuple(p if isinstance(p, SyntheticProgram)
-                          else p.resolve(t, from_block, to_block, end_ts) for p in synthetic)
-    return legs_from_rows(t, ref_rows, tr_rows, end_ts, synthetic, reroute, custody_rows)
+        synthetic = tuple(
+            p if isinstance(p, SyntheticProgram)
+            else p.resolve(t, from_block, to_block, end_ts, scan_start=scan_start)
+            for p in synthetic)
+    legs = legs_from_rows(t, ref_rows, tr_rows, end_ts, synthetic, reroute, custody_rows)
+    if scan_start is not None and not legs.empty:
+        legs = legs[legs["ts"] >= midnight_ts(scan_start)].copy()
+    return legs
 
 
 def _leg(t: Target, user: str, r, amount: float, ref: tuple[int, int] | None) -> dict:

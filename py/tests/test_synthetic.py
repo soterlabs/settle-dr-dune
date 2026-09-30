@@ -21,15 +21,17 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT / "py"))
 
-from drhs import events, twa  # noqa: E402
+from drhs import events, state_checkpoint, twa  # noqa: E402
 from drhs.hypersync import LogRow  # noqa: E402
 from drhs.sources import template_ab  # noqa: E402
 from drhs.sources.template_ab import (  # noqa: E402
     COWSWAP, REROUTED_CODES, SyntheticProgram, merge_referrals,
-    rerouted_referrals, synthetic_referrals,
+    reroute_intermediaries, rerouted_referrals, synthetic_referrals,
 )
 
 SUSDS = template_ab.SUSDS_ETH
@@ -190,6 +192,33 @@ def _warm(owner, code, n=2):
     """Extra Referral events in unrelated txs so `owner` clears the
     MIN_INTERMEDIARY_EVENTS threshold (routers emit the code repeatedly)."""
     return [_ref(f"0xwarm{i}", 1, owner, code) for i in range(n)]
+
+
+def test_router_crossing_threshold_after_checkpoint_changes_classification():
+    cutoff = DAY + 86400
+    rows = [_ref("0x1", 1, R, 1004, ts=DAY),
+            _ref("0x2", 1, R, 1004, ts=DAY + 1),
+            _ref("0x3", 1, R, 1004, ts=cutoff + 1)]
+    assert reroute_intermediaries(
+        rows, REROUTED_CODES, before_ts=cutoff) == frozenset()
+    assert reroute_intermediaries(rows, REROUTED_CODES) == frozenset({R})
+
+
+def test_incremental_target_forces_replay_on_router_threshold_crossing(monkeypatch):
+    cutoff = date(2025, 1, 2)
+    full_refs = [_ref("0x1", 1, R, 1004, ts=DAY),
+                 _ref("0x2", 1, R, 1004, ts=DAY + 1),
+                 _ref("0x3", 1, R, 1004, ts=DAY + 86401)]
+    monkeypatch.setattr(
+        template_ab, "fetch_target_rows_ranged",
+        lambda *_args: (full_refs[-1:], [], 10, 20))
+    monkeypatch.setattr(template_ab, "target_block_range", lambda *_args: (0, 20))
+    monkeypatch.setattr(
+        template_ab.hypersync, "query_logs",
+        lambda *_args, **_kwargs: type("Result", (), {"rows": full_refs})())
+    with pytest.raises(state_checkpoint.FullReplayRequired, match="classification changed"):
+        template_ab._legs_for_target(
+            SUSDS, DAY + 2 * 86400, reroute=REROUTED_CODES, scan_start=cutoff)
 
 
 def test_reroute_forwarder_code_to_recipient():

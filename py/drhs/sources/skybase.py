@@ -207,7 +207,10 @@ def check_pendle_backing(transfers, sy_transfers, end_ts):
         LOG.warning("Pendle backing/supply divergence in %s blocks; final gap=%s wei", gaps, backing-supply)
     return backing, supply, gaps
 
-def build_legs(targets, *, end_date=DEFAULT_END, excluded=frozenset()):
+def build_legs(targets, *, end_date=DEFAULT_END, excluded=frozenset(),
+               scan_start=None):
+    if scan_start is not None:
+        raise ValueError("Skybase protocol replay does not yet accept incremental scans")
     end_ts = midnight_ts(end_date)
     frames = []
     if PENDLE in targets:

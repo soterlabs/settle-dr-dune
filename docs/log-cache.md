@@ -8,10 +8,11 @@ disk and serves later runs from it, fetching only blocks not yet covered. A
 monthly settlement becomes "download one month of new blocks + local compute";
 the 8 Base shards download once and read 7 times.
 
-**What it is NOT.** No methodology change: balances are still replayed from
-genesis every run (deltas → levels, window-global attribution — see the
-"why full history" discussion in the PR). Only the *transport* of historical
-events moves from network to disk.
+**What it is NOT.** No methodology change: only the *transport* of immutable
+historical events moves from network to disk. Starting with the August 2026
+close, the separate month-end state checkpoints in
+`docs/month-end-state-checkpoints.md` also avoid replaying old cached events;
+they preserve the same balance and last-referral-wins state explicitly.
 
 ## Mechanics (`py/drhs/logcache.py`, wired inside `hypersync.query_logs`)
 
