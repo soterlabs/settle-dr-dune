@@ -8,7 +8,7 @@ Writes to hypersync-results/dr/:
     dr_rollup_by_refcode_token.csv
 
 Default mode is CHUNKED (docs/prd-chunked-pipeline.md): one target per
-subprocess (worker: run_dr_chunk.py), sequential, with checkpoint CSVs under
+subprocess (worker: run_dr_chunk.py), sequential, with Parquet checkpoints under
 --chunks-dir — a killed run resumes by skipping completed chunks; oversized
 targets are user-hash sharded (exact by per-user independence). The
 monolithic in-process path (--monolithic) remains for small source subsets
@@ -30,9 +30,10 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(Path(__file__).parent))
 load_dotenv(ROOT / ".env")
 
+from drhs import state_checkpoint  # noqa: E402
 from drhs.revenue import pipeline  # noqa: E402
 from drhs.window import DEFAULT_END, beyond_cutoff_message  # noqa: E402
-from run_dr_chunk import (chunk_csv, chunk_plan, check_archive_coverage,  # noqa: E402
+from run_dr_chunk import (chunk_parquet, chunk_plan, check_archive_coverage,  # noqa: E402
                           ensure_manifest, load_chunks, scan_chains)
 from run_source import build_source_legs  # noqa: E402
 
@@ -46,17 +47,26 @@ def _jobs(families: list[str] | None, chunks_dir: Path):
     out = []
     for name, (_f, _s, _t, n) in chunk_plan(families).items():
         for shard in ([None] if not n else [f"{k}/{n}" for k in range(n)]):
-            out.append((name, shard, chunk_csv(chunks_dir, name, shard)))
+            out.append((name, shard, chunk_parquet(chunks_dir, name, shard)))
     return out
+
+
+def _job_done(name: str, shard: str | None, checkpoint: Path, args) -> bool:
+    if not checkpoint.exists():
+        return False
+    if args.end.day != 1 or args.end < state_checkpoint.FIRST_CUTOFF:
+        return True
+    return state_checkpoint.snapshot_complete(
+        args.state_dir, args.end, name, shard)
 
 
 def _run_chunked(families: list[str], args) -> int:
     jobs = _jobs(families, args.chunks_dir)
 
     if args.list:
-        for name, shard, csv in jobs:
-            state = "done" if csv.exists() else "pending"
-            print(f"{csv.name:55s} {state}")
+        for name, shard, checkpoint in jobs:
+            state = "done" if _job_done(name, shard, checkpoint, args) else "pending"
+            print(f"{checkpoint.name:55s} {state}")
         return 0
 
     if not args.fresh:
@@ -68,35 +78,43 @@ def _run_chunked(families: list[str], args) -> int:
     # refuse the run without destroying good checkpoints, and a combine-only
     # rerun over complete checkpoints stays fully offline (no pending -> no
     # chains -> no probe).
-    pending = {name for name, _s, csv in jobs if args.fresh or not csv.exists()}
+    pending = {name for name, shard, checkpoint in jobs
+               if args.fresh or args.full_replay
+               or not _job_done(name, shard, checkpoint, args)}
     check_archive_coverage(scan_chains(pending), args.end)
     if args.fresh:
         # wipe EVERYTHING (incl. out-of-plan strays and the manifest): a fresh
         # run must not inherit any file this plan does not account for.
-        for f in args.chunks_dir.glob("chunk_*.csv"):
-            f.unlink()
+        for pattern in ("chunk_*.csv", "chunk_*.parquet"):
+            for f in args.chunks_dir.glob(pattern):
+                f.unlink()
         mf = args.chunks_dir / "manifest.json"
         if mf.exists():
             mf.unlink()
         ensure_manifest(args.chunks_dir, args.end)
 
     failed: list[str] = []
-    for name, shard, csv in jobs:
-        if csv.exists():
-            print(f"[dr] {csv.name} exists, skipping", flush=True)
+    for name, shard, checkpoint in jobs:
+        if not args.fresh and not args.full_replay and _job_done(
+                name, shard, checkpoint, args):
+            print(f"[dr] {checkpoint.name} exists, skipping", flush=True)
             continue
         cmd = [sys.executable, "-u", str(Path(__file__).parent / "run_dr_chunk.py"),
-               name, "--end", args.end.isoformat(), "--chunks-dir", str(args.chunks_dir)]
+               name, "--end", args.end.isoformat(), "--chunks-dir", str(args.chunks_dir),
+               "--state-dir", str(args.state_dir)]
         if shard:
             cmd += ["--shard", shard]
+        if args.full_replay:
+            cmd += ["--full-replay"]
         print(f"[dr] chunk {name}{'/' + shard if shard else ''} ...", flush=True)
         rc = subprocess.run(cmd).returncode
         if rc != 0:
             print(f"[dr] !!! chunk {name}{'/' + shard if shard else ''} FAILED (exit {rc})",
                   flush=True)
-            failed.append(csv.name)
+            failed.append(checkpoint.name)
 
-    missing = [csv.name for _, _, csv in jobs if not csv.exists()]
+    missing = [checkpoint.name for name, shard, checkpoint in jobs
+               if not _job_done(name, shard, checkpoint, args)]
     if failed or missing:
         print(f"[dr] INCOMPLETE — failed: {failed or '-'} missing: {missing or '-'}")
         return 1
@@ -109,9 +127,9 @@ def _combine_chunks(families: list[str], args) -> int:
     # silently double count; load_chunks errors on it). Selected families
     # must be complete; other families may be partially present and are
     # read but filtered out below.
-    plan_files = [csv for _, _, csv in _jobs(None, args.chunks_dir)]
-    missing = [csv.name for _, _, csv in _jobs(families, args.chunks_dir)
-               if not csv.exists()]
+    plan_files = [checkpoint for _, _, checkpoint in _jobs(None, args.chunks_dir)]
+    missing = [checkpoint.name for _, _, checkpoint in _jobs(families, args.chunks_dir)
+               if not checkpoint.exists()]
     if missing:
         raise SystemExit(f"[dr] missing planned checkpoints: {missing}")
     df = load_chunks(args.chunks_dir, expected=[p for p in plan_files if p.exists()])
@@ -150,8 +168,13 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=ROOT / "hypersync-results" / "dr")
     ap.add_argument("--chunks-dir", type=Path,
                     default=ROOT / "hypersync-results" / "dr_full")
+    ap.add_argument("--state-dir", type=Path,
+                    default=ROOT / "hypersync-results" / "dr_state",
+                    help="complete month-end state (August 2026 onward)")
     ap.add_argument("--fresh", action="store_true",
-                    help="recompute chunks even if their checkpoint CSV exists")
+                    help="recompute chunks even if their Parquet checkpoint exists")
+    ap.add_argument("--full-replay", action="store_true",
+                    help="audit escape hatch: ignore prior state and refresh all chunks")
     ap.add_argument("--list", action="store_true", help="print the chunk plan and exit")
     ap.add_argument("--monolithic", action="store_true",
                     help="legacy in-process path (OOMs the 3.7GB box on a full run)")

@@ -47,12 +47,16 @@ class SourceSpec:
     # custody perimeters: named Morpho positions counted as still-held
     # (template A only) — see drhs.sources.custody.
     custody: tuple = ()
+    # Whether a holder-state checkpoint is sufficient to start this source at
+    # a month boundary. Skybase's Morpho/Pendle model also has protocol-level
+    # state, so those small sources retain their full-replay fallback.
+    incremental: bool = True
 
 
 SPECS: dict[str, SourceSpec] = {
-    "skybase_pendle": SourceSpec(skybase, [skybase.PENDLE], 0),
-    "skybase_flagship": SourceSpec(skybase, [skybase.FLAGSHIP], 0),
-    "skybase_risk_capital": SourceSpec(skybase, [skybase.RISK_CAPITAL], 0),
+    "skybase_pendle": SourceSpec(skybase, [skybase.PENDLE], 0, incremental=False),
+    "skybase_flagship": SourceSpec(skybase, [skybase.FLAGSHIP], 0, incremental=False),
+    "skybase_risk_capital": SourceSpec(skybase, [skybase.RISK_CAPITAL], 0, incremental=False),
     # Template B — stUSDS (no exclusions). Full-history parity confirmed.
     "stusds": SourceSpec(template_ab, [template_ab.STUSDS], 7877544),
     # Template A — sUSDS / sUSDC (protocol-holder exclusions). sUSDS eth also
@@ -108,7 +112,7 @@ SPECS: dict[str, SourceSpec] = {
 
 
 def build_source_legs(name: str, end_date: date, *, include_synthetic: bool = True,
-                      targets: list | None = None):
+                      targets: list | None = None, scan_start: date | None = None):
     """``include_synthetic=False`` builds the pre-synthetic (Dune-parity) legs —
     used by validate.py, since the Dune queries carry no synthetic programs
     (this switch also disables re-routed codes). ``targets`` restricts the
@@ -124,7 +128,8 @@ def build_source_legs(name: str, end_date: date, *, include_synthetic: bool = Tr
         if s.custody:
             kw["custody"] = s.custody
     return s.template.build_legs(targets if targets is not None else s.targets,
-                                 end_date=end_date, excluded=s.excluded, **kw)
+                                 end_date=end_date, excluded=s.excluded,
+                                 scan_start=scan_start, **kw)
 
 
 def _parse_date(s: str) -> date:

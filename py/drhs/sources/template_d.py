@@ -77,13 +77,14 @@ def legs_from_rows(t: FarmTarget, ref_rows, stake_rows, end_ts: int) -> pd.DataF
     return pd.DataFrame(recs)
 
 
-def fetch_target_rows(t: FarmTarget, end_ts: int):
+def fetch_target_rows(t: FarmTarget, end_ts: int, scan_start: date | None = None):
     """Fetch Referral rows and Staked+Withdrawn rows for the farm over the window.
 
     Returns (referral_rows, stake_rows); stake_rows mixes Staked and Withdrawn
     (distinguished by topic0 downstream).
     """
-    start_ts = int(datetime(t.start_date.year, t.start_date.month, t.start_date.day,
+    start = max(t.start_date, scan_start) if scan_start else t.start_date
+    start_ts = int(datetime(start.year, start.month, start.day,
                             tzinfo=timezone.utc).timestamp())
     try:
         from_block = hypersync.find_block_at_or_before(t.blockchain, start_ts)
@@ -106,12 +107,17 @@ def fetch_target_rows(t: FarmTarget, end_ts: int):
 def build_legs(
     targets: list[FarmTarget], *, end_date: date = DEFAULT_END,
     excluded: frozenset[str] = frozenset(),
+    scan_start: date | None = None,
 ) -> pd.DataFrame:
     end_ts = _end_ts(end_date)
+    start_ts = int(datetime(scan_start.year, scan_start.month, scan_start.day,
+                            tzinfo=timezone.utc).timestamp()) if scan_start else None
     frames = []
     for t in targets:
-        ref_rows, stake_rows = fetch_target_rows(t, end_ts)
+        ref_rows, stake_rows = fetch_target_rows(t, end_ts, scan_start)
         legs = legs_from_rows(t, ref_rows, stake_rows, end_ts)
+        if start_ts is not None and not legs.empty:
+            legs = legs[legs["ts"] >= start_ts].copy()
         if not legs.empty:
             frames.append(legs)
     if not frames:
