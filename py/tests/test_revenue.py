@@ -20,7 +20,7 @@ ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT / "py"))
 
 from drhs.revenue import monthly, pipeline, rates  # noqa: E402
-from drhs.window import REWARD_END, REWARD_START  # noqa: E402
+from drhs.window import DEFAULT_END, LAST_SETTLED_DAY, REWARD_END, REWARD_START  # noqa: E402
 
 # reward_per values locked from the Dune 7877547 diff (all matched exactly).
 LOCKED = {
@@ -84,6 +84,11 @@ def test_all_reward_sources_are_restricted_to_calendar_2026():
                              conv_lookup=monthly.const_conv)
     assert (REWARD_START, REWARD_END) == (date(2026, 1, 1), date(2027, 1, 1))
     assert list(out["month"]) == ["2026-01-01", "2026-12-01"]
+
+
+def test_deployed_window_covers_full_september_2026():
+    assert DEFAULT_END == date(2026, 10, 1)
+    assert LAST_SETTLED_DAY == date(2026, 9, 30)
 
 
 def test_final_combine_rejects_stale_non_2026_checkpoint_rows():
