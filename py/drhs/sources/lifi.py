@@ -157,8 +157,9 @@ class IntegratorProgram:
     def matches(self, integrator: str) -> bool:
         return integrator.lower() == self.integrator.lower()
 
-    def resolve(self, target, from_block: int, to_block: int, end_ts: int):
-        return resolve(self, target, from_block, to_block, end_ts)
+    def resolve(self, target, from_block: int, to_block: int, end_ts: int,
+                scan_start: date | None = None):
+        return resolve(self, target, from_block, to_block, end_ts, scan_start)
 
 
 # Osero's frontend routes swaps/bridges through Li.Fi under integrator id
@@ -249,7 +250,8 @@ def _blocks_for(chain: str, start_ts: int, end_ts: int) -> tuple[int, int]:
             hypersync.find_block_at_or_before(chain, end_ts - 1))
 
 
-def resolve(program: IntegratorProgram, target, from_block: int, to_block: int, end_ts: int):
+def resolve(program: IntegratorProgram, target, from_block: int, to_block: int,
+            end_ts: int, scan_start: date | None = None):
     """Scan Li.Fi events for ``program`` and return the concrete SyntheticProgram
     for ``target`` (tx-anchored). The scan is bounded below by the program's
     eligibility start — nothing before it can be tagged anyway."""
@@ -284,6 +286,10 @@ def resolve(program: IntegratorProgram, target, from_block: int, to_block: int, 
     for oc in program.origin_chains:
         if oc == chain or oc not in hypersync.HYPERSYNC_HOSTS:
             continue
+        # Deliberately retain the full eligibility history on origin chains:
+        # a bridge can remain pending for arbitrarily long, so a fixed margin
+        # before ``scan_start`` cannot preserve full-replay equivalence. The
+        # high-volume target Transfer/destination scans still use from_block.
         ofb, otb = _blocks_for(oc, start_ts - ORIGIN_LEAD_SECONDS, end_ts)
         started += _scan(oc, [{"address": [LIFI_DIAMOND], "topics": [[TRANSFER_STARTED_TOPIC0]]}],
                          ofb, otb, _started)

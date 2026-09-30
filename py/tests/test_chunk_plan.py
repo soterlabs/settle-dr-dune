@@ -22,7 +22,7 @@ from drhs.sources import holder  # noqa: E402
 import pytest  # noqa: E402
 
 from run_dr_chunk import (  # noqa: E402
-    SHARD_RE, SHARDS, chunk_csv, chunk_plan, load_chunks, parse_shard,
+    SHARD_RE, SHARDS, chunk_parquet, chunk_plan, load_chunks, parse_shard,
 )
 from run_source import SPECS  # noqa: E402
 
@@ -65,9 +65,9 @@ def test_sharded_targets_exist_in_specs():
     assert set(SHARDS) <= keys
 
 
-def test_chunk_csv_names_are_shard_guard_compatible():
+def test_chunk_parquet_names_are_shard_guard_compatible():
     """Pins the REAL production regex against the real filename builder."""
-    p = chunk_csv(Path("/x"), "susds_psm3_base_sUSDS", "3/4")
+    p = chunk_parquet(Path("/x"), "susds_psm3_base_sUSDS", "3/4")
     m = SHARD_RE.match(p.stem)
     assert m and m.group(1) == "susds_psm3_base_sUSDS" and m.group(3) == "4"
 
@@ -88,30 +88,41 @@ def test_sharding_sp_sources_is_refused():
 
 def test_load_chunks_guards(tmp_path):
     import pandas as pd
-    row = "month,blockchain,token,ref_code,dr_usd,source\n2026-01-01,ethereum,sUSDS,99,1.0,psm3\n"
-    (tmp_path / "chunk_a_s0of2.csv").write_text(row)
-    (tmp_path / "chunk_a_s1of2.csv").write_text(row)
+    row = pd.DataFrame([dict(month="2026-01-01", blockchain="ethereum",
+                             token="sUSDS", ref_code=99, dr_usd=1.0,
+                             source="psm3")])
+    row.to_parquet(tmp_path / "chunk_a_s0of2.parquet", index=False)
+    row.to_parquet(tmp_path / "chunk_a_s1of2.parquet", index=False)
     df = load_chunks(tmp_path)
     assert float(df["dr_usd"].sum()) == 2.0
     # unsharded checkpoint beside its shard set -> stray error in strict mode
-    (tmp_path / "chunk_a.csv").write_text(row)
+    row.to_parquet(tmp_path / "chunk_a.parquet", index=False)
     with pytest.raises(SystemExit, match="strays"):
-        load_chunks(tmp_path, expected=[tmp_path / "chunk_a_s0of2.csv",
-                                        tmp_path / "chunk_a_s1of2.csv"])
-    (tmp_path / "chunk_a.csv").unlink()
+        load_chunks(tmp_path, expected=[tmp_path / "chunk_a_s0of2.parquet",
+                                        tmp_path / "chunk_a_s1of2.parquet"])
+    (tmp_path / "chunk_a.parquet").unlink()
     # mixed shard-N families -> error even without a plan
-    (tmp_path / "chunk_a_s0of3.csv").write_text(row)
+    row.to_parquet(tmp_path / "chunk_a_s0of3.parquet", index=False)
     with pytest.raises(SystemExit, match="mixed shard"):
         load_chunks(tmp_path)
 
 
 def test_manifest_pins_end(tmp_path):
+    import json
     from datetime import date as _d
-    from run_dr_chunk import ensure_manifest
+    from run_dr_chunk import CHECKPOINT_FORMAT, ensure_manifest
     ensure_manifest(tmp_path, _d(2026, 7, 1))
     ensure_manifest(tmp_path, _d(2026, 7, 1))      # same end: fine
+    assert json.loads((tmp_path / "manifest.json").read_text())["format"] == CHECKPOINT_FORMAT
     with pytest.raises(SystemExit, match="end="):
         ensure_manifest(tmp_path, _d(2026, 8, 1))  # different end: refuse
+
+
+def test_manifest_rejects_legacy_csv_format(tmp_path):
+    from run_dr_chunk import ensure_manifest
+    (tmp_path / "manifest.json").write_text('{"end":"2026-10-01"}')
+    with pytest.raises(SystemExit, match="format=None"):
+        ensure_manifest(tmp_path, date(2026, 10, 1))
 
 
 # --- Template F holder source (pure legs) --------------------------------------

@@ -275,10 +275,10 @@ def test_generic_and_started_rows_must_come_from_the_diamond():
     assert txs == frozenset()
 
 
-def test_origin_scan_has_a_lead_margin_and_resolve_short_circuits(monkeypatch):
-    """Origin chains are scanned from start - ORIGIN_LEAD_SECONDS (a bridge
-    started just before the window can deliver inside it); a start at/after
-    the scan end skips every query."""
+def test_origin_scan_keeps_history_for_delayed_bridge_and_resolve_short_circuits(monkeypatch):
+    """Incremental target scans retain origin history: a bridge can complete
+    more than two days after it started. A program starting after the scan end
+    still skips every query."""
     from drhs import hypersync as hs
     asked = []
     monkeypatch.setattr(hs, "block_at_or_genesis", lambda chain, ts: asked.append((chain, ts)) or 10)
@@ -288,6 +288,10 @@ def test_origin_scan_has_a_lead_margin_and_resolve_short_circuits(monkeypatch):
     end_ts = 1_785_542_400  # 2026-08-01
     prog.resolve(SUSDS, 0, 100, end_ts)
     start_ts = 1_782_864_000  # 2026-07-01 00:00 UTC
+    assert ("base", start_ts - lifi.ORIGIN_LEAD_SECONDS) in asked
+    asked.clear()
+    checkpoint = date(2026, 7, 20)
+    prog.resolve(SUSDS, 50, 100, end_ts, scan_start=checkpoint)
     assert ("base", start_ts - lifi.ORIGIN_LEAD_SECONDS) in asked
     asked.clear()
     boom = lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not query"))

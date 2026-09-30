@@ -1,6 +1,6 @@
 """Build the HyperSync equivalent of dr_comparison_latest.xlsx.
 
-Soter tabs   : computed EXCLUSIVELY from hypersync-results/dr_full/*.csv
+Soter tabs   : computed EXCLUSIVELY from hypersync-results/dr_full/*.parquet
                (event-derived on-chain data; rates = locked protocol constants).
 Reference    : Spark / Amatsu / BA / Payouts tabs copied VERBATIM from the old
                workbook (clearly labeled reference data, never mixed into Soter).
@@ -22,6 +22,7 @@ MEASURE = REPO / "hypersync-results" / "measurements"
 OLD = REPO / "dune-results" / "dr_comparison_latest.xlsx"
 NEW = REPO / "hypersync-results" / "dr_comparison_hypersync.xlsx"
 CHUNK_DIR = REPO / "hypersync-results" / "dr_full"
+STATE_DIR = REPO / "hypersync-results" / "dr_state"
 
 from drhs.window import LAST_SETTLED_DAY  # noqa: E402
 
@@ -85,7 +86,8 @@ NOTES = {
     10001: "Synthetic code: Smart-contract-held L2 sUSDS (code 0 split).",
 }
 
-from run_dr_chunk import chunk_csv, chunk_plan, load_chunks  # noqa: E402
+from run_dr_chunk import (chunk_parquet, chunk_plan, load_chunks,  # noqa: E402
+                          require_complete_state)
 
 # The workbook must be built from a COMPLETE chunk set for the window it
 # claims: the dir's manifest pins the --end its checkpoints were built with,
@@ -103,9 +105,11 @@ if _mf_end < _need_end:
         f"{CHUNK_DIR} holds checkpoints for end={_mf_end} but the workbook spans "
         f"through {MONTHS_2026[-1]} (needs end >= {_need_end}) — re-run "
         "run_dr_pipeline.py for the extended window first")
-_expected = [chunk_csv(CHUNK_DIR, name, shard)
-             for name, (_f, _s, _t, _n) in chunk_plan().items()
-             for shard in ([None] if not _n else [f"{k}/{_n}" for k in range(_n)])]
+_jobs = [(name, shard)
+         for name, (_f, _s, _t, _n) in chunk_plan().items()
+         for shard in ([None] if not _n else [f"{k}/{_n}" for k in range(_n)])]
+_expected = [chunk_parquet(CHUNK_DIR, name, shard) for name, shard in _jobs]
+require_complete_state(STATE_DIR, date.fromisoformat(_mf_end), _jobs)
 df = load_chunks(CHUNK_DIR, expected=_expected)
 print(f"combined chunks from {CHUNK_DIR} -> {len(df)} grouped rows")
 df["month_s"] = df["month"].str[:7]

@@ -48,13 +48,14 @@ BRIDGE_USDS = HolderTarget(
     "0x1e1d42781fc170ef9da004fb735f56f0276d01b8", 4001, 18, date(2024, 9, 1))
 
 
-def fetch_target_rows(t: HolderTarget, end_ts: int):
+def fetch_target_rows(t: HolderTarget, end_ts: int, scan_start: date | None = None):
     """Transfer ``LogRow``s touching the holder (both directions), deduped.
 
     The two topic selections overlap on self-transfers; query_logs already
     returns each log once per selection, so dedupe by (block, log_index).
     """
-    start_ts = int(datetime(t.start_date.year, t.start_date.month, t.start_date.day,
+    start = max(t.start_date, scan_start) if scan_start else t.start_date
+    start_ts = int(datetime(start.year, start.month, start.day,
                             tzinfo=timezone.utc).timestamp())
     from_block = hypersync.find_block_at_or_before(t.blockchain, start_ts)
     to_block = hypersync.find_block_at_or_before(t.blockchain, end_ts - 1)
@@ -108,9 +109,15 @@ def legs_from_rows(t: HolderTarget, tr_rows, end_ts: int) -> pd.DataFrame:
 def build_legs(
     targets: list[HolderTarget], *, end_date: date = DEFAULT_END,
     excluded: frozenset[str] = frozenset(),
+    scan_start: date | None = None,
 ) -> pd.DataFrame:
     end_ts = _end_ts(end_date)
-    frames = [legs_from_rows(t, fetch_target_rows(t, end_ts), end_ts) for t in targets]
+    start_ts = int(datetime(scan_start.year, scan_start.month, scan_start.day,
+                            tzinfo=timezone.utc).timestamp()) if scan_start else None
+    frames = [legs_from_rows(t, fetch_target_rows(t, end_ts, scan_start), end_ts)
+              for t in targets]
+    if start_ts is not None:
+        frames = [f[f["ts"] >= start_ts].copy() for f in frames if not f.empty]
     frames = [f for f in frames if not f.empty]
     if not frames:
         return pd.DataFrame(columns=[

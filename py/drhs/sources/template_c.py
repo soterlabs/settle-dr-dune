@@ -87,12 +87,13 @@ def legs_from_rows(t: PSMTarget, swap_rows, tr_rows, end_ts: int) -> pd.DataFram
     return template_ab.transfer_legs(t, tr_rows, latest_referral_from_swaps(t, swap_rows), end_ts)
 
 
-def fetch_target_rows(t: PSMTarget, end_ts: int):
+def fetch_target_rows(t: PSMTarget, end_ts: int, scan_start: date | None = None):
     """Fetch raw Swap (from PSM3) + Transfer (from token) LogRows over the window.
 
     Mirrors template_ab.fetch_target_rows; returns (swap_rows, transfer_rows).
     """
-    start_ts = int(datetime(t.start_date.year, t.start_date.month, t.start_date.day,
+    start = max(t.start_date, scan_start) if scan_start else t.start_date
+    start_ts = int(datetime(start.year, start.month, start.day,
                             tzinfo=timezone.utc).timestamp())
     try:
         from_block = hypersync.find_block_at_or_before(t.blockchain, start_ts)
@@ -118,12 +119,17 @@ def fetch_target_rows(t: PSMTarget, end_ts: int):
 def build_legs(
     targets: list[PSMTarget], *, end_date: date = DEFAULT_END,
     excluded: frozenset[str] = frozenset(),
+    scan_start: date | None = None,
 ) -> pd.DataFrame:
     end_ts = _end_ts(end_date)
+    start_ts = int(datetime(scan_start.year, scan_start.month, scan_start.day,
+                            tzinfo=timezone.utc).timestamp()) if scan_start else None
     frames = []
     for t in targets:
-        swap_rows, tr_rows = fetch_target_rows(t, end_ts)
+        swap_rows, tr_rows = fetch_target_rows(t, end_ts, scan_start)
         legs = legs_from_rows(t, swap_rows, tr_rows, end_ts)
+        if start_ts is not None and not legs.empty:
+            legs = legs[legs["ts"] >= start_ts].copy()
         if not legs.empty:
             frames.append(legs)
     if not frames:

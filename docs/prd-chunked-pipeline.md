@@ -52,7 +52,7 @@ the chunked design the one blessed path.
 ### (a) One target per subprocess, checkpointed (~150 lines, mostly moves)
 
 - **Worker** `py/run_dr_chunk.py` (promoted, de-duplicated): computes ONE
-  chunk's monthly DR and writes `hypersync-results/dr_full/chunk_<name>.csv`.
+  chunk's monthly DR and writes `hypersync-results/dr_full/chunk_<name>.parquet`.
   Chunk registry derives from `run_source.SPECS` + `pipeline.SOURCE_MONTHLY`
   (family → reclass/conversion/sp-deployment), not a hand-maintained dict:
   every Template A/C/D/E target becomes a chunk automatically; the class-D
@@ -60,9 +60,9 @@ the chunked design the one blessed path.
   (`py/drhs/sources/holder.py`, intraday TWA per PR #10 `c63fe10`).
 - **Orchestrator** `run_dr_pipeline.py`: for each chunk, spawn
   `subprocess.run([sys.executable, "run_dr_chunk.py", name, *shard_args])`;
-  skip if the checkpoint CSV exists; on non-zero exit, log and continue
+  skip if the Parquet checkpoint exists; on non-zero exit, log and continue
   (partial failures surface in the summary, exit code non-zero at the end).
-  Then the existing `pipeline.combine` runs over the chunk CSVs
+  Then the existing `pipeline.combine` runs over the chunk Parquet files
   (groupby-sum on `(month, blockchain, token, ref_code, source)` — additive
   because every grouping input is row-local).
 - `--sources`, `--end`, `--out` keep their semantics; add `--fresh` (ignore
