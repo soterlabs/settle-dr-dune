@@ -22,3 +22,6 @@ month,ref_code,source,accrued_usds,eligible_for_payment_view
 2026-08,1997,skybase_pendle,12719.448148603155,True
 2026-08,1998,skybase_flagship,5696.546283555785,True
 2026-08,1999,skybase_risk_capital,28.220374374186715,True
+2026-09,1997,skybase_pendle,14902.209044943567,True
+2026-09,1998,skybase_flagship,5185.50936733331,True
+2026-09,1999,skybase_risk_capital,20.346494922357287,True

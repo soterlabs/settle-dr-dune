@@ -114,9 +114,9 @@ Skybase payment reconciliation is not rewritten.
 ```
 
 The three worker commands rebuild only the affected Ethereum checkpoints; no
-unrelated source needs to be rerun for this rate correction. The separate
-September results change combines them with the already-computed sources and
-regenerates the settlement workbook.
+unrelated source needs to be rerun for this rate correction. Their corrected
+rows are combined with the already-computed September sources to regenerate
+the settlement workbook without replaying any unrelated venue.
 The verifier compares exact integer market state, adapter shares and token
 balances against independent RPC reads pinned to the same historical block.
 Set `ETH_RPC` to override the public Ethereum endpoint for audit reads only.
@@ -152,9 +152,9 @@ Production computation remains HyperSync-only.
 | 1999 Risk Capital | 1,782.89 |
 | Total | 115,147.61 |
 
-`hypersync-results/skybase_historical_additions.csv` provides the revised 2026
-per-month breakdown through August. The **Skybase Historical Additions**
-workbook tab will be regenerated with the September-wide results. These are
-accrual additions for the next cycle's reconciliation; independently confirm
-any payments already made outside this calculation before using them as
-transfer amounts.
+`hypersync-results/skybase_historical_additions.csv` and the **Skybase
+Historical Additions** workbook tab provide the revised 2026 per-month
+breakdown through September. The Jan–Aug figures above are the historical
+true-up; September is the current-cycle accrual. Independently confirm any
+payments already made outside this calculation before using historical
+accruals as transfer amounts.
