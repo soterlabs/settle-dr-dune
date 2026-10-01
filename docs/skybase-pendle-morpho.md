@@ -83,11 +83,13 @@ Sources: [Morpho event definitions](https://github.com/morpho-org/morpho-blue/bl
 
 ## Rates, conversion and historical adjustments
 
-These three codes use the supplied memo's **flat 0.2% annual rate / 12**:
-daily contributions are `daily_TWA * conversion * 0.002 / (12 * days_in_month)`.
-The full calendar month remains the denominator for launches and exits.
-No historical Boosted DR or Integration Boost is added. Existing venues keep
-their existing rate schedule and daily-accrual convention.
+These three codes use the same **XR schedule as the Grove farm**: 0.5% APY
+from 2026-01-01 through 2026-07-08, then 0.2% APY from 2026-07-09. Daily
+contributions are `daily_TWA * conversion / 365 * reward_per`, where
+`reward_per = 365 * ((1 + APY)^(1/365) - 1)`. July is therefore blended at
+the exact July 9 boundary. This operator decision supersedes the external
+memo's flat-0.2% assumption. No Integration Boost is added beyond that
+schedule.
 
 Pendle uses the repository's daily sUSDS-to-USDS conversion (last ERC4626
 Deposit/Withdraw rate of each day, forward-filled). This is a daily valuation
@@ -143,10 +145,10 @@ Production computation remains HyperSync-only.
 
 | Code | Jan–Aug 2026 accrual added (USDS) |
 |---|---:|
-| 1997 Pendle | 27,740.24 |
-| 1998 Flagship | 34,229.17 |
-| 1999 Risk Capital | 758.75 |
-| Total | 62,728.16 |
+| 1997 Pendle | 41,560.04 |
+| 1998 Flagship | 71,804.68 |
+| 1999 Risk Capital | 1,782.89 |
+| Total | 115,147.61 |
 
 The workbook's **Skybase Historical Additions** tab and
 `hypersync-results/skybase_historical_additions.csv` provide the 2026 per-month

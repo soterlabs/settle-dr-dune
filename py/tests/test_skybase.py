@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from drhs import events, twa
 from drhs.hypersync import LogRow
 from drhs.sources import skybase as s, holder, template_ab
-from drhs.revenue import monthly
+from drhs.revenue import monthly, rates
 from drhs.window import midnight_ts
 
 A, B = s.ADAPTERS
@@ -49,7 +49,8 @@ def test_half_month_borrow_exclusive_end_and_daily_proration():
     legs, _, _ = s.replay_markets(rs, s.ADAPTERS, end)
     tw = twa.compute_twa(legs, fill_through=date(2026, 2, 28))
     out = monthly.monthly_dr(tw, reclassify=monthly.reclass_none, conv_lookup=monthly.const_conv)
-    assert out.dr_usd.sum() == pytest.approx(1.0)  # 12000 * half-month * .002/12
+    expected = 12000 * 14 / 365 * rates.daily_rate("XR", date(2026, 2, 1))
+    assert out.dr_usd.sum() == pytest.approx(expected)
 
 def test_adapter_burn_and_market_exit_remove_attribution():
     rs = [row(s.SUPPLY, [100*U, 100], idx=0),
@@ -103,10 +104,26 @@ def test_pendle_conversion_and_reserved_code_collision():
              time_weighted_avg_balance=12000)
     tw = pd.DataFrame([d])
     out=monthly.monthly_dr(tw,reclassify=monthly.reclass_none,conv_lookup=lambda *a:1.1)
-    assert out.dr_usd.sum()==pytest.approx(12000*1.1*.002/12/28)
+    expected = 12000 * 1.1 / 365 * rates.daily_rate("XR", date(2026, 2, 1))
+    assert out.dr_usd.sum() == pytest.approx(expected)
     tw.loc[0,'user_addr']=A
     with pytest.raises(ValueError,match='collides'):
         monthly.monthly_dr(tw,reclassify=monthly.reclass_none,conv_lookup=monthly.const_conv)
+
+
+@pytest.mark.parametrize("target", s.TARGETS)
+@pytest.mark.parametrize("dt,apy", [
+    (date(2026, 1, 1), 0.005),
+    (date(2026, 7, 8), 0.005),
+    (date(2026, 7, 9), 0.002),
+])
+def test_skybase_synthetic_codes_follow_grove_xr_boundary(target, dt, apy):
+    row = dict(blockchain=target.blockchain, contract_address=target.token,
+               symbol=target.symbol, user_addr=target.holder, dt=dt,
+               ref_code=target.ref_code, time_weighted_avg_balance=365)
+    out = monthly.monthly_dr(pd.DataFrame([row]), reclassify=monthly.reclass_none,
+                             conv_lookup=monthly.const_conv)
+    assert out.dr_usd.sum() == pytest.approx(rates.apy_to_daily(apy))
 
 def test_skybase_rewards_are_restricted_to_2026():
     rows = []

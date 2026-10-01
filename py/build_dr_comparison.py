@@ -58,9 +58,12 @@ def eligibility(code: int) -> tuple[str, str | None]:
     return ELIGIBILITY_OVERRIDES.get(code, (ELIGIBILITY_DEFAULT_START, None))
 
 NOTES = {
-    1997: "Skybase synthetic: Pendle SY sUSDS backing; whole wrapper counted once; flat 0.2% / 12.",
-    1998: "Skybase synthetic: USDS Flagship vault idle + its share of Morpho market idle USDS; no borrowed funds.",
-    1999: "Skybase synthetic: USDS Risk Capital vault idle + its share of Morpho market idle USDS; no borrowed funds.",
+    1997: "Skybase synthetic: Pendle SY sUSDS backing; whole wrapper counted "
+          "once; XR schedule.",
+    1998: "Skybase synthetic: USDS Flagship vault idle + its share of Morpho "
+          "market idle USDS; no borrowed funds; XR schedule.",
+    1999: "Skybase synthetic: USDS Risk Capital vault idle + its share of Morpho "
+          "market idle USDS; no borrowed funds; XR schedule.",
     -999999: "Synthetic code: Untagged USDS-CLE, USDS-SKY, USDS-SPK, USDS-GROVE, stUSDS.",
     0: "Explicit on-chain referral on Ethereum. L2 sUSDS split to 10000/10001.",
     99: "Synthetic code: Untagged sUSDS.",
