@@ -15,7 +15,9 @@ server-side time budget via ``next_block``. Auth is a bearer ``ENVIO_API_TOKEN``
 
 from __future__ import annotations
 
+import gzip
 import hashlib
+import json
 import logging
 import os
 import pickle
@@ -136,6 +138,40 @@ def _cache_put(key: str, value: Any) -> None:
 
 def _key(*parts: Any) -> str:
     return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()[:32]
+
+
+def _page_path(chain: str, body: dict) -> Path:
+    directory = _cache_dir() / "settled_log_pages_v1"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return directory / (_key(chain, json.dumps(body, sort_keys=True)) + ".json.gz")
+
+
+def _read_page(path: Path) -> dict | None:
+    try:
+        with gzip.open(path, "rt") as stream:
+            page = json.load(stream)
+        return (page if isinstance(page, dict) and isinstance(page.get("data"), list)
+                and {"next_block", "archive_height"} <= page.keys() else None)
+    except (OSError, ValueError, EOFError):
+        return None
+
+
+def _write_page(path: Path, page: dict) -> None:
+    # Optional cache: failed/partial writes must neither poison a retry nor
+    # prevent a complete provider response from being used. Compression keeps
+    # repeated-transfer histories small on the batch runner's disk.
+    tmp = path.with_suffix(f".{os.getpid()}.tmp")
+    try:
+        with gzip.open(tmp, "wt") as stream:
+            json.dump(page, stream)
+        os.replace(tmp, path)
+    except OSError:
+        _LOG.warning("Could not persist a historical HyperSync page; retry will refetch it")
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 # --------------------------------------------------------------------------
@@ -296,7 +332,15 @@ def _query_logs_live(
         if cursor >= end_exclusive:
             break
         body = {**base, "from_block": cursor, "to_block": end_exclusive}
-        page = _execute(chain, body, headers, post)
+        # Cache only real transport responses for already historical windows.
+        # Each page has its own cursor key, so interruption late in a multi-page
+        # scan preserves earlier pages. Shards share the same raw event pages.
+        # Injected fixture transports deliberately remain isolated from disk.
+        page_path = _page_path(chain, body) if post is requests.post else None
+        page = _read_page(page_path) if page_path else None
+        from_cache = page is not None
+        if page is None:
+            page = _execute(chain, body, headers, post)
         result.archive_height = max(
             result.archive_height, to_int(page.get("archive_height", 0) or 0)
         )
@@ -344,6 +388,13 @@ def _query_logs_live(
         nxt = page.get("next_block")
         if nxt is None or to_int(nxt) <= cursor:
             break
+        # Write AFTER decoding/validating rows and the advancement cursor. A
+        # missing timestamp or partial response must never become a durable
+        # failure. Head probes and near-head windows are never cached here.
+        head = to_int(page.get("archive_height", 0) or 0)
+        if (page_path is not None and not from_cache and head > 500
+                and to_block <= head - 500 and to_int(nxt) <= end_exclusive):
+            _write_page(page_path, page)
         cursor = to_int(nxt)
     if cursor < end_exclusive and result.archive_height:
         raise HyperSyncError(

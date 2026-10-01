@@ -220,3 +220,13 @@ sources (sUSDC, sp\*, L2 PSM3 base) is slow / memory-heavy. Windowed runs and th
 per-source monthly aggregation are fine; a vectorized TWA engine is the
 optimization for full-history production runs.
 ```
+
+### Resuming the September close
+
+Completed historical HyperSync log pages are cached under
+`$DRHS_CACHE_DIR/settled_log_pages_v1` (default `~/.cache/drhs`). Cache keys include
+the chain, exact cursor range, selectors, and requested fields. Pages are written
+atomically after row validation, only when the requested window is at least 500
+blocks behind the archive head. Near-head reads, head probes, and failed pages
+are never cached. Compressed pages let shards and retries reuse the same raw
+history without repeating provider scans; the reward calculation is unchanged.
