@@ -40,10 +40,10 @@ appears in those published payments:
 
 | Code | Venue | Jan–Aug calculated true-up (USDS) |
 |---:|---|---:|
-| 1997 | Pendle SY-sUSDS / PT-sUSDS backing | 27,740.24 |
-| 1998 | Morpho Vault USDS Flagship | 34,229.17 |
-| 1999 | Morpho Vault USDS Risk Capital | 758.75 |
-| | **Total** | **62,728.16** |
+| 1997 | Pendle SY-sUSDS / PT-sUSDS backing | 41,560.04 |
+| 1998 | Morpho Vault USDS Flagship | 71,804.68 |
+| 1999 | Morpho Vault USDS Risk Capital | 1,782.89 |
+| | **Total** | **115,147.61** |
 
 Those three existing synthetic codes remain necessary because the attributed
 custody positions do not emit a usable beneficiary referral code. No new
@@ -71,7 +71,7 @@ untagged and must not be paid. June contains only a sub-cent untagged artifact.
 The final September settlement should therefore present separately:
 
 1. September accrual from the completed `[2026-09-01, 2026-10-01)` run.
-2. The 62,728.16 USDS codes 1997–1999 historical true-up.
+2. The 115,147.61 USDS codes 1997–1999 historical true-up.
 3. The 61,966.17 USDS payable Grove-farm historical true-up, split by its
    emitted beneficiary codes rather than assigned a synthetic code.
 

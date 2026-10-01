@@ -83,11 +83,13 @@ Sources: [Morpho event definitions](https://github.com/morpho-org/morpho-blue/bl
 
 ## Rates, conversion and historical adjustments
 
-These three codes use the supplied memo's **flat 0.2% annual rate / 12**:
-daily contributions are `daily_TWA * conversion * 0.002 / (12 * days_in_month)`.
-The full calendar month remains the denominator for launches and exits.
-No historical Boosted DR or Integration Boost is added. Existing venues keep
-their existing rate schedule and daily-accrual convention.
+These three codes use the same **XR schedule as the Grove farm**: 0.5% APY
+from 2026-01-01 through 2026-07-08, then 0.2% APY from 2026-07-09. Daily
+contributions are `daily_TWA * conversion / 365 * reward_per`, where
+`reward_per = 365 * ((1 + APY)^(1/365) - 1)`. July is therefore blended at
+the exact July 9 boundary. This operator decision supersedes the external
+memo's flat-0.2% assumption. No Integration Boost is added beyond that
+schedule.
 
 Pendle uses the repository's daily sUSDS-to-USDS conversion (last ERC4626
 Deposit/Withdraw rate of each day, forward-filled). This is a daily valuation
@@ -104,24 +106,26 @@ Skybase payment reconciliation is not rewritten.
 ## Run and verify
 
 ```
-.venv/bin/python py/run_dr_pipeline.py --sources skybase_pendle,skybase_flagship,skybase_risk_capital --out hypersync-results/skybase-dr
+.venv/bin/python py/run_dr_chunk.py skybase_pendle_ethereum_sUSDS --end 2026-09-01 --full-replay --chunks-dir hypersync-results/dr_aug_skybase_xr_only --state-dir hypersync-results/dr_state_skybase_xr_only
+.venv/bin/python py/run_dr_chunk.py skybase_flagship_ethereum_USDS --end 2026-09-01 --full-replay --chunks-dir hypersync-results/dr_aug_skybase_xr_only --state-dir hypersync-results/dr_state_skybase_xr_only
+.venv/bin/python py/run_dr_chunk.py skybase_risk_capital_ethereum_USDS --end 2026-09-01 --full-replay --chunks-dir hypersync-results/dr_aug_skybase_xr_only --state-dir hypersync-results/dr_state_skybase_xr_only
 .venv/bin/python py/verify_skybase_venues.py --end 2026-09-01
-.venv/bin/python py/run_dr_pipeline.py
-.venv/bin/python py/build_dr_comparison.py
 .venv/bin/python -m pytest py/tests -q
 ```
 
-The first command fills three new checkpoints. The full runner reuses existing
-checkpoints and combines all sources; no old-source recomputation is needed.
+The three worker commands rebuild only the affected Ethereum checkpoints; no
+unrelated source needs to be rerun for this rate correction. Their corrected
+rows are combined with the already-computed September sources to regenerate
+the settlement workbook without replaying any unrelated venue.
 The verifier compares exact integer market state, adapter shares and token
 balances against independent RPC reads pinned to the same historical block.
 Set `ETH_RPC` to override the public Ethereum endpoint for audit reads only.
 Production computation remains HyperSync-only.
 
-## Validation and accrual additions (2026-09-15)
+## Validation and accrual additions (updated 2026-10-01)
 
-- Full offline suite after rebasing onto the post-Grove main branch: **135
-  passed**, including the new shared-market,
+- Full offline suite after applying the XR schedule: **169 passed**, including
+  the new rate-boundary, shared-market,
   outside-lender, fee-dilution, borrow, liquidation, burned-share, wallet
   relocation, referral-collision and SY reconciliation cases.
 - At block **25878704** (last block before 2026-09-01), replay equals RPC
@@ -138,18 +142,19 @@ Production computation remains HyperSync-only.
   the existing July/August aggregator-verification limitation remains.
 - A second historical audit at **2026-04-01**, block **24781026**, also matches
   exactly: four market states, five adapter positions, all wallet balances,
-  and Pendle backing versus SY supply. The generated workbook preserves
-  the latest settled baseline and adds only these newly replayed sources.
+  and Pendle backing versus SY supply. The scoped August rerun wrote exactly
+  the three affected checkpoint files and no other source outputs.
 
 | Code | Jan–Aug 2026 accrual added (USDS) |
 |---|---:|
-| 1997 Pendle | 27,740.24 |
-| 1998 Flagship | 34,229.17 |
-| 1999 Risk Capital | 758.75 |
-| Total | 62,728.16 |
+| 1997 Pendle | 41,560.04 |
+| 1998 Flagship | 71,804.68 |
+| 1999 Risk Capital | 1,782.89 |
+| Total | 115,147.61 |
 
-The workbook's **Skybase Historical Additions** tab and
-`hypersync-results/skybase_historical_additions.csv` provide the 2026 per-month
-breakdown. These are accrual additions for the next cycle's reconciliation;
-independently confirm any payments already made outside this calculation
-before using them as transfer amounts.
+`hypersync-results/skybase_historical_additions.csv` and the **Skybase
+Historical Additions** workbook tab provide the revised 2026 per-month
+breakdown through September. The Jan–Aug figures above are the historical
+true-up; September is the current-cycle accrual. Independently confirm any
+payments already made outside this calculation before using historical
+accruals as transfer amounts.
