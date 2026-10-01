@@ -35,8 +35,12 @@ def _daily_last_rate_series(chain: str, vault: str, start: date, end: date) -> p
     """[dt, rate] for one vault: assets/shares of the last Deposit/Withdraw per
     day, forward-filled over [start, end], default 1.0."""
     start_ts = int(datetime(start.year, start.month, start.day, tzinfo=timezone.utc).timestamp())
-    # SQL scans evt_block_time <= end_date + 1 day; resolve a block bound past that.
-    end_plus = datetime(end.year, end.month, end.day, tzinfo=timezone.utc) + timedelta(days=2)
+    # Rows after the last requested UTC day are discarded below. Resolve
+    # that exact inclusive cutoff: padding into the next unsettled day
+    # clamps to a moving archive head and defeats historical page reuse
+    # on every chunk during a fresh month close.
+    end_plus = (datetime(end.year, end.month, end.day, tzinfo=timezone.utc)
+                + timedelta(days=1) - timedelta(seconds=1))
     try:
         from_block = hypersync.find_block_at_or_before(chain, start_ts)
     except hypersync.HyperSyncError:

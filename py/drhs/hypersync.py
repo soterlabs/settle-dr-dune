@@ -15,7 +15,9 @@ server-side time budget via ``next_block``. Auth is a bearer ``ENVIO_API_TOKEN``
 
 from __future__ import annotations
 
+import gzip
 import hashlib
+import json
 import logging
 import os
 import pickle
@@ -138,6 +140,40 @@ def _key(*parts: Any) -> str:
     return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()[:32]
 
 
+def _page_path(chain: str, body: dict) -> Path:
+    directory = _cache_dir() / "settled_log_pages_v1"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return directory / (_key(chain, endpoint(chain), json.dumps(body, sort_keys=True)) + ".json.gz")
+
+
+def _read_page(path: Path) -> dict | None:
+    try:
+        with gzip.open(path, "rt") as stream:
+            page = json.load(stream)
+        return (page if isinstance(page, dict) and isinstance(page.get("data"), list)
+                and {"next_block", "archive_height"} <= page.keys() else None)
+    except (OSError, ValueError, EOFError):
+        return None
+
+
+def _write_page(path: Path, page: dict) -> None:
+    # Optional cache: failed/partial writes must neither poison a retry nor
+    # prevent a complete provider response from being used. Compression keeps
+    # repeated-transfer histories small on the batch runner's disk.
+    tmp = path.with_suffix(f".{os.getpid()}.tmp")
+    try:
+        with gzip.open(tmp, "wt") as stream:
+            json.dump(page, stream)
+        os.replace(tmp, path)
+    except OSError:
+        _LOG.warning("Could not persist a historical HyperSync page; retry will refetch it")
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 # --------------------------------------------------------------------------
 # Core queries
 # --------------------------------------------------------------------------
@@ -189,7 +225,8 @@ def query_logs(
     if not use_cache:
         return _query_logs_live(chain, selections, from_block, to_block,
                                 log_fields=log_fields, block_fields=block_fields,
-                                with_tx_to=with_tx_to, post=post)
+                                with_tx_to=with_tx_to, post=post,
+                                use_page_cache=False)
     if to_block < from_block:
         return QueryResult()  # degenerate range: empty, like the live path
 
@@ -214,7 +251,7 @@ def query_logs(
         low_to = meta.cached_from - 1 if to_block >= meta.cached_from - 1 else to_block
         low = _query_logs_live(chain, selections, from_block, low_to,
                                log_fields=log_fields, block_fields=block_fields,
-                               with_tx_to=with_tx_to)
+                               with_tx_to=with_tx_to, post=post)
         result.archive_height = low.archive_height
         new_meta = None
         if low.archive_height > 0 and low_to == meta.cached_from - 1:
@@ -235,7 +272,7 @@ def query_logs(
         live_from = max(from_block, cov_hi + 1)
         live = _query_logs_live(chain, selections, live_from, to_block,
                                 log_fields=log_fields, block_fields=block_fields,
-                                with_tx_to=with_tx_to)
+                                with_tx_to=with_tx_to, post=post)
         result.rows.extend(live.rows)
         result.archive_height = max(result.archive_height, live.archive_height)
         # Persist only blocks a safe depth below the head observed by THIS
@@ -279,9 +316,12 @@ def _query_logs_live(
     block_fields: list[str] | None = None,
     with_tx_to: bool = False,
     post: Callable[..., Any] = requests.post,
+    use_page_cache: bool = True,
 ) -> QueryResult:
     """The raw network fetch — pages followed via ``next_block`` until
     ``to_block``. Always complete or raising; never partial."""
+    from drhs import logcache
+
     lf = log_fields or _DEFAULT_LOG_FIELDS
     bf = block_fields or _DEFAULT_BLOCK_FIELDS
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {_token()}"}
@@ -292,11 +332,23 @@ def _query_logs_live(
     result = QueryResult()
     cursor = from_block
     end_exclusive = to_block + 1  # HyperSync to_block is exclusive
+    page_cache_depth = logcache.SAFE_DEPTH_BLOCKS.get(
+        chain, logcache._DEFAULT_SAFE_DEPTH
+    )
     for _ in range(_MAX_PAGES):
         if cursor >= end_exclusive:
             break
         body = {**base, "from_block": cursor, "to_block": end_exclusive}
-        page = _execute(chain, body, headers, post)
+        # Cache only real transport responses for already historical windows.
+        # Each page has its own cursor key, so interruption late in a multi-page
+        # scan preserves earlier pages. Shards share the same raw event pages.
+        # Injected fixture transports deliberately remain isolated from disk.
+        page_path = (_page_path(chain, body)
+                     if use_page_cache and post is requests.post else None)
+        page = _read_page(page_path) if page_path else None
+        from_cache = page is not None
+        if page is None:
+            page = _execute(chain, body, headers, post)
         result.archive_height = max(
             result.archive_height, to_int(page.get("archive_height", 0) or 0)
         )
@@ -344,6 +396,14 @@ def _query_logs_live(
         nxt = page.get("next_block")
         if nxt is None or to_int(nxt) <= cursor:
             break
+        # Write AFTER decoding/validating rows and the advancement cursor. A
+        # missing timestamp or partial response must never become a durable
+        # failure. Head probes and near-head windows are never cached here.
+        head = to_int(page.get("archive_height", 0) or 0)
+        if (page_path is not None and not from_cache and head > page_cache_depth
+                and to_block <= head - page_cache_depth
+                and to_int(nxt) <= end_exclusive):
+            _write_page(page_path, page)
         cursor = to_int(nxt)
     if cursor < end_exclusive and result.archive_height:
         raise HyperSyncError(

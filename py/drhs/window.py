@@ -24,7 +24,7 @@ from datetime import date, datetime, timedelta, timezone
 REWARD_START = date(2026, 1, 1)
 REWARD_END = date(2027, 1, 1)
 
-# Deployed cutoff: events on/after 2026-10-01 are out of the settled window.
+# September 2026 close: events on/after October 1 are outside this window.
 DEFAULT_END = date(2026, 10, 1)
 LAST_SETTLED_DAY = DEFAULT_END - timedelta(days=1)
 
