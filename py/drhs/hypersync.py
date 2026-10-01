@@ -143,7 +143,7 @@ def _key(*parts: Any) -> str:
 def _page_path(chain: str, body: dict) -> Path:
     directory = _cache_dir() / "settled_log_pages_v1"
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    return directory / (_key(chain, json.dumps(body, sort_keys=True)) + ".json.gz")
+    return directory / (_key(chain, endpoint(chain), json.dumps(body, sort_keys=True)) + ".json.gz")
 
 
 def _read_page(path: Path) -> dict | None:

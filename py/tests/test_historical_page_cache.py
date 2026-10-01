@@ -44,6 +44,9 @@ def test_historical_pages_reused_and_field_selection_is_part_of_key(monkeypatch,
     assert len(calls) == 1
     H.query_logs(*args, post=post, log_fields=['block_number', 'address'])
     assert len(calls) == 2
+    monkeypatch.setenv('HYPERSYNC_URL_ETHEREUM', 'https://alternate.example/query')
+    H.query_logs(*args, post=post)
+    assert len(calls) == 3
 
 
 def test_restart_reuses_pages_before_failed_cursor(monkeypatch, tmp_path):
