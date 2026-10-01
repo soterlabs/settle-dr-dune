@@ -320,6 +320,8 @@ def _query_logs_live(
 ) -> QueryResult:
     """The raw network fetch — pages followed via ``next_block`` until
     ``to_block``. Always complete or raising; never partial."""
+    from drhs import logcache
+
     lf = log_fields or _DEFAULT_LOG_FIELDS
     bf = block_fields or _DEFAULT_BLOCK_FIELDS
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {_token()}"}
@@ -330,6 +332,9 @@ def _query_logs_live(
     result = QueryResult()
     cursor = from_block
     end_exclusive = to_block + 1  # HyperSync to_block is exclusive
+    page_cache_depth = logcache.SAFE_DEPTH_BLOCKS.get(
+        chain, logcache._DEFAULT_SAFE_DEPTH
+    )
     for _ in range(_MAX_PAGES):
         if cursor >= end_exclusive:
             break
@@ -395,8 +400,9 @@ def _query_logs_live(
         # missing timestamp or partial response must never become a durable
         # failure. Head probes and near-head windows are never cached here.
         head = to_int(page.get("archive_height", 0) or 0)
-        if (page_path is not None and not from_cache and head > 500
-                and to_block <= head - 500 and to_int(nxt) <= end_exclusive):
+        if (page_path is not None and not from_cache and head > page_cache_depth
+                and to_block <= head - page_cache_depth
+                and to_int(nxt) <= end_exclusive):
             _write_page(page_path, page)
         cursor = to_int(nxt)
     if cursor < end_exclusive and result.archive_height:

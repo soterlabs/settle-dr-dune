@@ -77,6 +77,17 @@ def test_near_head_pages_are_not_cached(monkeypatch, tmp_path):
     assert len(calls) == 2
 
 
+def test_l2_pages_use_chain_specific_reorg_depth(monkeypatch, tmp_path):
+    calls = []
+    post = setup(monkeypatch, tmp_path,
+                 lambda b: calls.append(b) or response(10, 21, head=2000))
+    args = ('arbitrum', [{'address': ['0xabc']}], 10, 20)
+    H._query_logs_live(*args, post=post)
+    H._query_logs_live(*args, post=post)
+    assert len(calls) == 2
+    assert not list(tmp_path.rglob('*.json.gz'))
+
+
 def test_malformed_page_is_not_cached(monkeypatch, tmp_path):
     def fetch(body):
         data = response(10, 21)

@@ -226,7 +226,8 @@ optimization for full-history production runs.
 Completed historical HyperSync log pages are cached under
 `$DRHS_CACHE_DIR/settled_log_pages_v1` (default `~/.cache/drhs`). Cache keys include
 the chain, exact cursor range, selectors, and requested fields. Pages are written
-atomically after row validation, only when the requested window is at least 500
-blocks behind the archive head. Near-head reads, head probes, and failed pages
-are never cached. Compressed pages let shards and retries reuse the same raw
-history without repeating provider scans; the reward calculation is unchanged.
+atomically after row validation, only when the requested window is beyond the
+chain-specific reorg-safety depth used by the checkpoint cache. Near-head reads,
+head probes, and failed pages are never cached. Compressed pages let shards and
+retries reuse the same raw history without repeating provider scans; the reward
+calculation is unchanged.
