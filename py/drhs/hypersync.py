@@ -225,7 +225,8 @@ def query_logs(
     if not use_cache:
         return _query_logs_live(chain, selections, from_block, to_block,
                                 log_fields=log_fields, block_fields=block_fields,
-                                with_tx_to=with_tx_to, post=post)
+                                with_tx_to=with_tx_to, post=post,
+                                use_page_cache=False)
     if to_block < from_block:
         return QueryResult()  # degenerate range: empty, like the live path
 
@@ -250,7 +251,7 @@ def query_logs(
         low_to = meta.cached_from - 1 if to_block >= meta.cached_from - 1 else to_block
         low = _query_logs_live(chain, selections, from_block, low_to,
                                log_fields=log_fields, block_fields=block_fields,
-                               with_tx_to=with_tx_to)
+                               with_tx_to=with_tx_to, post=post)
         result.archive_height = low.archive_height
         new_meta = None
         if low.archive_height > 0 and low_to == meta.cached_from - 1:
@@ -271,7 +272,7 @@ def query_logs(
         live_from = max(from_block, cov_hi + 1)
         live = _query_logs_live(chain, selections, live_from, to_block,
                                 log_fields=log_fields, block_fields=block_fields,
-                                with_tx_to=with_tx_to)
+                                with_tx_to=with_tx_to, post=post)
         result.rows.extend(live.rows)
         result.archive_height = max(result.archive_height, live.archive_height)
         # Persist only blocks a safe depth below the head observed by THIS
@@ -315,6 +316,7 @@ def _query_logs_live(
     block_fields: list[str] | None = None,
     with_tx_to: bool = False,
     post: Callable[..., Any] = requests.post,
+    use_page_cache: bool = True,
 ) -> QueryResult:
     """The raw network fetch — pages followed via ``next_block`` until
     ``to_block``. Always complete or raising; never partial."""
@@ -336,7 +338,8 @@ def _query_logs_live(
         # Each page has its own cursor key, so interruption late in a multi-page
         # scan preserves earlier pages. Shards share the same raw event pages.
         # Injected fixture transports deliberately remain isolated from disk.
-        page_path = _page_path(chain, body) if post is requests.post else None
+        page_path = (_page_path(chain, body)
+                     if use_page_cache and post is requests.post else None)
         page = _read_page(page_path) if page_path else None
         from_cache = page is not None
         if page is None:
