@@ -42,12 +42,12 @@ def test_registry_covers_every_production_synthetic_source():
     assert {twa.SENTINEL} == _codes_for("sentinel")
 
 
-def test_payability_matches_the_runtime_exclusion_set():
-    registry_non_payable = {
+def test_payable_view_matches_the_runtime_exclusion_set():
+    registry_excluded = {
         code for code, item in registry.SYNTHETIC_CODES.items()
-        if not item.payable
+        if not item.included_in_payable_view
     }
-    assert monthly.NON_PAYABLE_CODES == registry_non_payable
+    assert monthly.NON_PAYABLE_CODES == registry_excluded
 
 
 def test_real_emitted_reroutes_are_not_synthetic_codes():
@@ -64,7 +64,8 @@ def test_documentation_matches_registry_metadata():
         documented[int(cells[1])] = (cells[2], cells[3], cells[4])
 
     expected = {
-        code: (item.name, item.mechanism, "Yes" if item.payable else "No")
+        code: (item.name, item.mechanism,
+               "Yes" if item.included_in_payable_view else "No")
         for code, item in registry.SYNTHETIC_CODES.items()
     }
     assert documented == expected

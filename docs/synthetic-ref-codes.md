@@ -11,7 +11,7 @@ delivery evidence. Conversely, `1004`, `3006`, and `4011` are **not** synthetic
 codes. They are emitted on-chain and only rerouted from an intermediary to the
 final recipient.
 
-| Code | Name | Mechanism | Payable | Meaning |
+| Code | Name | Mechanism | In Payable view | Meaning |
 |---:|---|---|:---:|---|
 | -999999 | untagged_sentinel | sentinel | No | Internal marker for balances without a referral |
 | 99 | untagged_susds | reclassification | No | Untagged sUSDS bucket |
@@ -30,10 +30,16 @@ final recipient.
 | 4001 | keel_solana_bridge | holder | Yes | USDS held by the Solana OFT bridge |
 | 9001 | spark_aave | holder | Yes | USDS held by Aave's aEthUSDS contract |
 
-The registry deliberately does not contain beneficiary ownership. Ownership
-is an operational settlement concern maintained by `settlement-cycle`; this
-repository defines how balances acquire codes and whether a synthetic bucket
-is payable.
+“In Payable view” refers specifically to this repository's
+`Payable by Ref Code` workbook sheet and mirrors
+`drhs.revenue.monthly.NON_PAYABLE_CODES`. It is not a universal payout flag.
+
+`settlement-cycle` consumes the workbook's `Soter by Ref Code` sheet—not the
+Payable view—and applies beneficiary ownership from its own
+`config/dr_ref_codes.yaml`. That separation is intentional. For example, code
+`127` is excluded from this repository's Payable view but is currently mapped
+to Spark by `settlement-cycle`. This registry neither changes nor overrides
+that consumer-side decision.
 
 The registry is intentionally an audit layer rather than a new runtime
 dependency. Its tests compare it with every production definition, which keeps

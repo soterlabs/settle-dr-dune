@@ -25,7 +25,7 @@ class SyntheticCode:
     code: int
     name: str
     mechanism: Mechanism
-    payable: bool
+    included_in_payable_view: bool
     description: str
 
 
