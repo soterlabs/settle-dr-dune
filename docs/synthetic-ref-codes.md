@@ -39,4 +39,3 @@ The registry is intentionally an audit layer rather than a new runtime
 dependency. Its tests compare it with every production definition, which keeps
 the catalog complete without invalidating existing month-end checkpoints for a
 behavior-preserving organizational change.
-

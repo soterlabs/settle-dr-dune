@@ -70,4 +70,3 @@ if len({item.name for item in _DEFINITIONS}) != len(_DEFINITIONS):
     raise RuntimeError("duplicate synthetic ref-code name")
 
 SYNTHETIC_CODES = MappingProxyType({item.code: item for item in _DEFINITIONS})
-

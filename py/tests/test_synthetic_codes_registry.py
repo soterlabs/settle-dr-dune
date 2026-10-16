@@ -83,4 +83,3 @@ def test_catalog_stays_outside_checkpoint_fingerprinted_runtime():
     ]
     for path in paths:
         assert "synthetic_codes" not in path.read_text(encoding="utf-8"), path
-
