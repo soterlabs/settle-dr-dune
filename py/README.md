@@ -190,6 +190,10 @@ Per-token migration off Dune onto Envio HyperSync:
 
 ## Attribution extensions (post-Dune)
 
+- **Synthetic-code registry** (`drhs/synthetic_codes.py`) — the audited list of
+  every code created by this pipeline, its mechanism, and whether it is
+  payable. CI compares it with the wired production definitions without
+  changing checkpoint fingerprints. See `docs/synthetic-ref-codes.md`.
 - **Custody perimeters** (`drhs/sources/custody.py`) — a strategy's named Morpho
   position counted as still held (Osero 3009, `docs/osero-looping-vault.md`).
 - **Re-routed intermediary codes** (`template_ab.REROUTED_CODES`) — 1004 / 4011 /
