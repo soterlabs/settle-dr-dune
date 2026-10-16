@@ -24,12 +24,16 @@ def test_registry_covers_every_production_synthetic_source():
                if isinstance(target, holder.HolderTarget)}
     pseudo_referrals = {program.ref_code for spec in SPECS.values()
                         for program in spec.synthetic}
+    ordinary_user = "0x0000000000000000000000000000000000000001"
+    contract_user = next(iter(monthly.PSM3_CODE0_10001["base"]))
     reclassifications = {
-        99,
-        127,
-        10000,
-        10001,
-        *monthly.SP_UNTAGGED.values(),
+        monthly.reclass_susds_susdc("sUSDS", twa.SENTINEL, ordinary_user, "ethereum"),
+        monthly.reclass_susds_susdc("sUSDC", twa.SENTINEL, ordinary_user, "base"),
+        monthly.reclass_psm3("sUSDS", twa.SENTINEL, ordinary_user, "base"),
+        monthly.reclass_psm3("sUSDS", 0, ordinary_user, "base"),
+        monthly.reclass_psm3("sUSDS", 0, contract_user, "base"),
+        *(monthly.reclass_sp(symbol, twa.SENTINEL, ordinary_user, "ethereum")
+          for symbol in monthly.SP_UNTAGGED),
     }
 
     assert holders == _codes_for("holder")
@@ -50,10 +54,33 @@ def test_real_emitted_reroutes_are_not_synthetic_codes():
     assert template_ab.REROUTED_CODES.isdisjoint(registry.SYNTHETIC_CODES)
 
 
-def test_registry_codes_are_unique_and_documented():
-    assert len(registry.SYNTHETIC_CODES) == len(set(registry.SYNTHETIC_CODES))
+def test_documentation_matches_registry_metadata():
     doc = ROOT / "docs" / "synthetic-ref-codes.md"
-    text = doc.read_text(encoding="utf-8")
-    for code in registry.SYNTHETIC_CODES:
-        assert f"| {code} |" in text
+    documented = {}
+    for line in doc.read_text(encoding="utf-8").splitlines():
+        cells = [cell.strip() for cell in line.split("|")]
+        if len(cells) < 7 or not cells[1].lstrip("-").isdigit():
+            continue
+        documented[int(cells[1])] = (cells[2], cells[3], cells[4])
+
+    expected = {
+        code: (item.name, item.mechanism, "Yes" if item.payable else "No")
+        for code, item in registry.SYNTHETIC_CODES.items()
+    }
+    assert documented == expected
+
+
+def test_catalog_stays_outside_checkpoint_fingerprinted_runtime():
+    """An audit-only catalog must not silently become a checkpoint dependency."""
+    paths = [
+        *(ROOT / "py" / "drhs" / "sources").glob("*.py"),
+        *(ROOT / "py" / "drhs" / "revenue").glob("*.py"),
+        ROOT / "py" / "drhs" / "events.py",
+        ROOT / "py" / "drhs" / "twa.py",
+        ROOT / "py" / "drhs" / "state_checkpoint.py",
+        ROOT / "py" / "run_source.py",
+        ROOT / "py" / "run_dr_chunk.py",
+    ]
+    for path in paths:
+        assert "synthetic_codes" not in path.read_text(encoding="utf-8"), path
 
