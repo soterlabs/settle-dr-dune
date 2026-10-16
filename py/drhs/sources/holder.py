@@ -21,7 +21,7 @@ from datetime import date, datetime, timezone
 
 import pandas as pd
 
-from .. import events, hypersync
+from .. import events, hypersync, synthetic_codes
 from .template_ab import DEFAULT_END, _end_ts
 
 
@@ -41,11 +41,13 @@ USDS = "0xdc035d45d973e3ec169d2276ddab16f1e407384f"
 # USDS in Aave aEthUSDS — synthetic 9001 (query 7877569 lineage).
 AAVE_USDS = HolderTarget(
     "ethereum", "USDS", USDS,
-    "0x32a6268f9ba3642dda7892add74f1d34469a4259", 9001, 18, date(2024, 9, 1))
+    "0x32a6268f9ba3642dda7892add74f1d34469a4259",
+    synthetic_codes.SPARK_AAVE, 18, date(2024, 9, 1))
 # USDS in the Solana OFT bridge — synthetic 4001 (query 7877570 lineage).
 BRIDGE_USDS = HolderTarget(
     "ethereum", "USDS", USDS,
-    "0x1e1d42781fc170ef9da004fb735f56f0276d01b8", 4001, 18, date(2024, 9, 1))
+    "0x1e1d42781fc170ef9da004fb735f56f0276d01b8",
+    synthetic_codes.KEEL_SOLANA_BRIDGE, 18, date(2024, 9, 1))
 
 
 def fetch_target_rows(t: HolderTarget, end_ts: int, scan_start: date | None = None):

@@ -23,7 +23,7 @@ from datetime import date, datetime, timezone
 
 import pandas as pd
 
-from .. import events, hypersync
+from .. import events, hypersync, synthetic_codes
 from ..window import DEFAULT_END, midnight_ts  # noqa: F401 — canonical home is drhs/window.py;
 # re-exported here because every runner/template historically imports it from
 # this module.
@@ -147,7 +147,7 @@ class EntrypointProgram:
 # docs/oneinch-1020-skybase.md. NB 1inch's own code 4011 (executor Referral,
 # re-routed) keeps precedence in the few txs that carry it (24 of 4,025).
 ONEINCH_SKYBASE = EntrypointProgram(
-    "oneinch_skybase", 1020,
+    "oneinch_skybase", synthetic_codes.SKYBASE_ONEINCH,
     frozenset({
         "0x1111111254fb6c44bac0bed2854e76f90643097d",  # AggregationRouter v4
         "0x1111111254eeb25477b68fb85ed929f73a960582",  # AggregationRouter v5
@@ -162,7 +162,7 @@ ONEINCH_SKYBASE = EntrypointProgram(
 # during `settle()`/`swap()` executions, so no separate Trade-event check is
 # needed to recognise a settlement tx.
 COWSWAP = SyntheticProgram(
-    "cowswap", 1003,
+    "cowswap", synthetic_codes.COWSWAP,
     frozenset({"0x9008d19f58aabd9ed0d60971565aa8510560ab41"}),
 )
 

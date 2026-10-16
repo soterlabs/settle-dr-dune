@@ -35,7 +35,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date
 
-from .. import hypersync
+from .. import hypersync, synthetic_codes
 from ..events import _word, decode_uint, topic_to_addr
 from ..window import midnight_ts
 
@@ -169,7 +169,7 @@ class IntegratorProgram:
 # chain the pipeline can scan; bridges from chains outside this list (polygon,
 # bsc, ...) are a documented gap until a HyperSync host is added for them.
 OSERO_FRONTEND = IntegratorProgram(
-    "lifi_oserofrontend", 3900, "oserofrontend",
+    "lifi_oserofrontend", synthetic_codes.OSERO_LIFI, "oserofrontend",
     origin_chains=("ethereum", "base", "arbitrum", "optimism", "unichain", "avalanche_c"),
     start=date(2026, 4, 1),
 )

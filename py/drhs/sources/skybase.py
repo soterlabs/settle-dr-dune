@@ -15,7 +15,7 @@ import logging
 import pandas as pd
 from eth_hash.auto import keccak
 
-from .. import events, hypersync
+from .. import events, hypersync, synthetic_codes
 from ..window import DEFAULT_END, midnight_ts
 from . import holder
 from .custody import MORPHO_BLUE, CREATE_MARKET_TOPIC0
@@ -26,11 +26,14 @@ SUSDS = "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd"
 # Fetch pre-2026 history to reconstruct the opening balances exactly; the
 # shared monthly calculator restricts rewards to calendar year 2026.
 PENDLE = holder.HolderTarget("ethereum", "sUSDS", SUSDS,
-    "0xbe3d4ec488a0a042bb86f9176c24f8cd54018ba7", 1997, 18, date(2024, 9, 1))
+    "0xbe3d4ec488a0a042bb86f9176c24f8cd54018ba7",
+    synthetic_codes.SKYBASE_PENDLE, 18, date(2024, 9, 1))
 FLAGSHIP = holder.HolderTarget("ethereum", "USDS", holder.USDS,
-    "0xe15fcc81118895b67b6647bbd393182df44e11e0", 1998, 18, date(2024, 9, 1))
+    "0xe15fcc81118895b67b6647bbd393182df44e11e0",
+    synthetic_codes.SKYBASE_FLAGSHIP, 18, date(2024, 9, 1))
 RISK_CAPITAL = holder.HolderTarget("ethereum", "USDS", holder.USDS,
-    "0xf42bca228d9bd3e2f8ee65fec3d21de1063882d4", 1999, 18, date(2024, 9, 1))
+    "0xf42bca228d9bd3e2f8ee65fec3d21de1063882d4",
+    synthetic_codes.SKYBASE_RISK_CAPITAL, 18, date(2024, 9, 1))
 TARGETS = (PENDLE, FLAGSHIP, RISK_CAPITAL)
 BY_CODE = {t.ref_code: t for t in TARGETS}
 # Verified parentVault(), asset(), morpho() on 2026-09-15. New adapter types

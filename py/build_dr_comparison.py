@@ -25,6 +25,7 @@ CHUNK_DIR = REPO / "hypersync-results" / "dr_full"
 STATE_DIR = REPO / "hypersync-results" / "dr_state"
 
 from drhs.window import LAST_SETTLED_DAY  # noqa: E402
+from drhs import synthetic_codes  # noqa: E402
 
 AGG_CODES = {1003, 1004, 4011}
 # Settled months of 2026 — DERIVED from the deployed window so a settlement
@@ -58,35 +59,35 @@ def eligibility(code: int) -> tuple[str, str | None]:
     return ELIGIBILITY_OVERRIDES.get(code, (ELIGIBILITY_DEFAULT_START, None))
 
 NOTES = {
-    1997: "Skybase synthetic: Pendle SY sUSDS backing; whole wrapper counted "
+    synthetic_codes.SKYBASE_PENDLE: "Skybase synthetic: Pendle SY sUSDS backing; whole wrapper counted "
           "once; XR schedule.",
-    1998: "Skybase synthetic: USDS Flagship vault idle + its share of Morpho "
+    synthetic_codes.SKYBASE_FLAGSHIP: "Skybase synthetic: USDS Flagship vault idle + its share of Morpho "
           "market idle USDS; no borrowed funds; XR schedule.",
-    1999: "Skybase synthetic: USDS Risk Capital vault idle + its share of Morpho "
+    synthetic_codes.SKYBASE_RISK_CAPITAL: "Skybase synthetic: USDS Risk Capital vault idle + its share of Morpho "
           "market idle USDS; no borrowed funds; XR schedule.",
-    -999999: "Synthetic code: Untagged USDS-CLE, USDS-SKY, USDS-SPK, USDS-GROVE, stUSDS.",
+    synthetic_codes.UNTAGGED_SENTINEL: "Synthetic code: Untagged USDS-CLE, USDS-SKY, USDS-SPK, USDS-GROVE, stUSDS.",
     0: "Explicit on-chain referral on Ethereum. L2 sUSDS split to 10000/10001.",
-    99: "Synthetic code: Untagged sUSDS.",
-    127: "Synthetic code: untagged sUSDC",
-    130: "Synthetic code: Untagged spUSDT — Spark's own product; Spark "
+    synthetic_codes.UNTAGGED_SUSDS: "Synthetic code: Untagged sUSDS.",
+    synthetic_codes.UNTAGGED_SUSDC: "Synthetic code: untagged sUSDC",
+    synthetic_codes.UNTAGGED_SPUSDT: "Synthetic code: Untagged spUSDT — Spark's own product; Spark "
          "reports this code directly (payable to Spark).",
-    131: "Synthetic code: Untagged spUSDC — folded into 128 by Spark on "
+    synthetic_codes.UNTAGGED_SPUSDC: "Synthetic code: Untagged spUSDC — folded into 128 by Spark on "
          "their side (payable to Spark).",
-    132: "Synthetic code: Untagged spPYUSD — folded into 128 by Spark on "
+    synthetic_codes.UNTAGGED_SPPYUSD: "Synthetic code: Untagged spPYUSD — folded into 128 by Spark on "
          "their side (payable to Spark).",
     197: "stUSDS",
-    1003: "CowSwap — synthetic delivery tagging in the unified stream (event-derived).",
+    synthetic_codes.COWSWAP: "CowSwap — synthetic delivery tagging in the unified stream (event-derived).",
     1004: "Paraswap — re-routed router-owned Referral(1004) in the unified stream.",
     4011: "1inch — re-routed executor-owned Referral(4011) in the unified stream.",
     1016: "lazysummer — only the on-chain farm Referral(1016) events appear here; "
           "Amatsu additionally tags fleet ark balances DB-side (docs/lazysummer-1016.md).",
-    9001: "Synthetic code: USDS in Aave aEthUSDS; entire contract balance. "
+    synthetic_codes.SPARK_AAVE: "Synthetic code: USDS in Aave aEthUSDS; entire contract balance. "
           "Intraday TWA (clean methodology) — the deployed Dune query used "
           "EOD snapshots, which under-count ~20% on heavy-flow months.",
-    4001: "Synthetic code: USDS in Solana OFT Bridge; entire contract balance. "
+    synthetic_codes.KEEL_SOLANA_BRIDGE: "Synthetic code: USDS in Solana OFT Bridge; entire contract balance. "
           "Intraday TWA (clean methodology; Dune query used EOD snapshots).",
-    10000: "Synthetic code: L2 sUSDS default PSM3 code 0.",
-    10001: "Synthetic code: Smart-contract-held L2 sUSDS (code 0 split).",
+    synthetic_codes.L2_DEFAULT_ZERO: "Synthetic code: L2 sUSDS default PSM3 code 0.",
+    synthetic_codes.L2_CONTRACT_ZERO: "Synthetic code: Smart-contract-held L2 sUSDS (code 0 split).",
 }
 
 from run_dr_chunk import (chunk_parquet, chunk_plan, load_chunks,  # noqa: E402
