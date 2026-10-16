@@ -27,7 +27,6 @@ from typing import Callable
 import pandas as pd
 
 from ..window import REWARD_END, REWARD_START
-from .. import synthetic_codes
 from . import rates
 
 # psm3 code-0 -> 10001 address lists (else 10000), per chain. Lower-cased.
@@ -52,11 +51,7 @@ PSM3_CODE0_10001 = {
     },
 }
 
-SP_UNTAGGED = {
-    "spUSDC": synthetic_codes.UNTAGGED_SPUSDC,
-    "spUSDT": synthetic_codes.UNTAGGED_SPUSDT,
-    "spPYUSD": synthetic_codes.UNTAGGED_SPPYUSD,
-}
+SP_UNTAGGED = {"spUSDC": 131, "spUSDT": 130, "spPYUSD": 132}
 
 # Ref codes that are SYNTHETIC AND UNPAID — tracked for completeness but
 # mapping to NO beneficiary. Payment tooling (the workbook's Payable view,
@@ -68,12 +63,12 @@ SP_UNTAGGED = {
 # NOT here: 130/131/132 (untagged sp* holders) — those are untagged inside
 # SPARK'S OWN product, and Spark's reporting claims them (131/132 are folded
 # into Spark's 128 on their side; 130 they report directly), so they are
-# payable-to-Spark, not beneficiary-less. Paid synthetic codes (1003 CowSwap,
-# 9001 Aave, 4001 bridge) and real emitted codes that are merely re-routed
-# (1004 Paraswap, 4011 1inch) must NEVER be added here either.
+# payable-to-Spark, not beneficiary-less. Paid/payable synthetic codes
+# (1003 cow, 1004 paraswap, 4011 1inch, 9001 Aave, 4001 bridge) must NEVER
+# be added here either.
 # Caveat to resolve with ops: 99 mirrors Spark's "house / untagged" bucket —
 # if Spark's payable claim ever includes it, it moves out of this set too.
-NON_PAYABLE_CODES = synthetic_codes.NON_PAYABLE_CODES
+NON_PAYABLE_CODES = frozenset({-999999, 99, 127, 10000, 10001})
 MONTHLY_COLUMNS = ["month", "blockchain", "token", "ref_code", "dr_usd"]
 
 
@@ -83,26 +78,21 @@ def _month(dt_s: str) -> str:
 
 # ---- reclassification --------------------------------------------------------
 def reclass_susds_susdc(symbol, ref, user, chain):
-    if ref == synthetic_codes.UNTAGGED_SENTINEL:
-        return (synthetic_codes.UNTAGGED_SUSDS if symbol == "sUSDS" else
-                synthetic_codes.UNTAGGED_SUSDC if symbol == "sUSDC" else ref)
+    if ref == -999999:
+        return 99 if symbol == "sUSDS" else (127 if symbol == "sUSDC" else ref)
     return ref
 
 
 def reclass_psm3(symbol, ref, user, chain):
-    if ref == synthetic_codes.UNTAGGED_SENTINEL:
-        return synthetic_codes.UNTAGGED_SUSDS
+    if ref == -999999:
+        return 99
     if ref == 0:
-        return (synthetic_codes.L2_CONTRACT_ZERO
-                if user.lower() in PSM3_CODE0_10001.get(chain, set())
-                else synthetic_codes.L2_DEFAULT_ZERO)
+        return 10001 if user.lower() in PSM3_CODE0_10001.get(chain, set()) else 10000
     return ref
 
 
 def reclass_sp(symbol, ref, user, chain):
-    if symbol in SP_UNTAGGED and ref in (
-            synthetic_codes.UNTAGGED_SENTINEL,
-            synthetic_codes.UNTAGGED_SUSDC):
+    if symbol in SP_UNTAGGED and ref in (-999999, 127):
         return SP_UNTAGGED[symbol]
     return ref
 

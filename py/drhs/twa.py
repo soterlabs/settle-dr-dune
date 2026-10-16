@@ -37,10 +37,8 @@ from datetime import date, datetime, timedelta, timezone
 import pandas as pd
 
 from .window import LAST_SETTLED_DAY
-from .synthetic_codes import UNTAGGED_SENTINEL
 
-# Backwards-compatible name used throughout the TWA/state-checkpoint code.
-SENTINEL = UNTAGGED_SENTINEL
+SENTINEL = -999999
 SECONDS_PER_DAY = 86400
 _DUST = 1e-9
 

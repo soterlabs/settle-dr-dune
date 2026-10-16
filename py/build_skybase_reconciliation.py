@@ -17,17 +17,12 @@ from pathlib import Path
 import pandas as pd
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "py"))
-
-from drhs import synthetic_codes  # noqa: E402
-
 MONTHS = [f"2026-{m:02d}" for m in range(1, 8)]
 
 PARTNER = {0: "Skybase (code 0)", 1: "Skybase (code 1)", 1001: "summerfi",
-           1002: "defisaver", synthetic_codes.COWSWAP: "cow",
-           1004: "paraswap", 1007: "yearn",
+           1002: "defisaver", 1003: "cow", 1004: "paraswap", 1007: "yearn",
            1015: "MOM", 1016: "lazysummer", 1017: "(1017)",
-           synthetic_codes.L2_DEFAULT_ZERO: "L2 PSM3 default code 0 (memo)"}
+           10000: "L2 PSM3 default code 0 (memo)"}
 
 # Paid DR per MSC month, transcribed from the sheet's per-code block
 # (columns: Skybase 0/1, summerfi..1017; MSC 6..10 = Feb..Jun 2026).
@@ -38,7 +33,7 @@ PAID: dict[int, dict[str, float | None]] = {
     1:    {"2026-01": None, "2026-02": 96894, "2026-03": 120812, "2026-04": 116183, "2026-05": 129037, "2026-06": 117784},
     1001: {"2026-01": None, "2026-02": 1601, "2026-03": 1655, "2026-04": 1434, "2026-05": 913, "2026-06": 810},
     1002: {"2026-01": None, "2026-02": 2971, "2026-03": 29196, "2026-04": 28955, "2026-05": 33175, "2026-06": 38593},
-    synthetic_codes.COWSWAP: {"2026-01": None, "2026-02": 0, "2026-03": 0, "2026-04": 0, "2026-05": 0, "2026-06": 0},
+    1003: {"2026-01": None, "2026-02": 0, "2026-03": 0, "2026-04": 0, "2026-05": 0, "2026-06": 0},
     1004: {"2026-01": None, "2026-02": 0, "2026-03": 0, "2026-04": 0, "2026-05": 0, "2026-06": 0},
     1007: {"2026-01": None, "2026-02": 13745, "2026-03": 15859, "2026-04": 14112, "2026-05": 10762, "2026-06": 0},
     1015: {"2026-01": None, "2026-02": 0, "2026-03": 0, "2026-04": 0, "2026-05": 0, "2026-06": 0},
@@ -66,7 +61,7 @@ def main() -> int:
             f"dr_monthly_combined.csv reaches only {have_max} but the reconciliation "
             f"spans through {MONTHS[-1]} — re-run run_dr_pipeline.py for the extended "
             "window first (a missing month would silently print as $0 calculated)")
-    codes = list(PAID) + [synthetic_codes.L2_DEFAULT_ZERO]
+    codes = list(PAID) + [10000]
     sub = df[(df["m"].isin(MONTHS)) & df["ref_code"].isin(codes)]
     calc = sub.groupby(["ref_code", "m"])["dr_usd"].sum()
 

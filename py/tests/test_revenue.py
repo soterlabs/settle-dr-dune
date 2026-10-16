@@ -19,7 +19,6 @@ import pytest
 ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT / "py"))
 
-from drhs import synthetic_codes  # noqa: E402
 from drhs.revenue import monthly, pipeline, rates  # noqa: E402
 from drhs.window import DEFAULT_END, LAST_SETTLED_DAY, REWARD_END, REWARD_START  # noqa: E402
 
@@ -129,15 +128,8 @@ def test_non_payable_registry():
     """Codes that are synthetic AND unpaid — excluded from payment tooling."""
     assert monthly.NON_PAYABLE_CODES == {-999999, 99, 127, 10000, 10001}
     # synthetic-but-PAID/payable program codes must never appear here
-    for paid_synthetic in (
-        synthetic_codes.COWSWAP,
-        synthetic_codes.SPARK_AAVE,
-        synthetic_codes.KEEL_SOLANA_BRIDGE,
-    ):
+    for paid_synthetic in (1003, 1004, 4011, 9001, 4001):
         assert paid_synthetic not in monthly.NON_PAYABLE_CODES
-    # These are real emitted codes whose attribution may be re-routed.
-    for emitted_reroute in (1004, 3006, 4011):
-        assert emitted_reroute not in synthetic_codes.SYNTHETIC_CODES
     # untagged-inside-Spark's-product codes are Spark's (131/132 folded into
     # their 128; 130 reported by Spark directly) — payable, so not here
     for spark_untagged in (130, 131, 132):
