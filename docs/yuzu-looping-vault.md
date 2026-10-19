@@ -33,6 +33,9 @@ Morpho markets, with no withdrawals or liquidations:
 
 The account's direct sUSDS wallet balance is zero. Event-replayed Morpho
 collateral equals minted shares exactly, with zero residual difference.
+Each supply transaction transfers the same shares account → execution helper
+→ Morpho. The helper's transaction-level net balance is zero; the two transfer
+legs have the same block timestamp, so it accrues no time-weighted balance.
 
 ## Tracking model
 
@@ -40,7 +43,9 @@ This uses the existing `CustodyPerimeter` model already applied to the
 Gauntlet `gtSkyLooping` strategy: wallet balance **W** plus the account's named
 Morpho collateral **C**. Morpho's pooled token balance remains excluded, so no
 other supplier or borrower balance is attributed and the shares are not
-double-counted.
+double-counted. For every live supply, the account's `-W` leg exactly matches
+its `+C` leg. The intervening helper nets to zero and the final Morpho holder
+leg is removed by `TEMPLATE_A_EXCLUDED`, leaving exactly one counted copy.
 
 The Referral and first supply occur in separate transactions. That is safe:
 the ordinary sUSDS mint leg establishes code 3000 for the account, and the
