@@ -70,7 +70,8 @@ SPECS: dict[str, SourceSpec] = {
                             synthetic=(template_ab.COWSWAP, lifi.OSERO_FRONTEND,
                                        template_ab.ONEINCH_SKYBASE),
                             reroute=template_ab.REROUTED_CODES,
-                            custody=(custody.OSERO_GTSKYLOOPING,)),
+                            custody=(custody.OSERO_GTSKYLOOPING,
+                                     custody.OSERO_YUZU_LOOPING)),
     # sUSDC also carries the re-routed codes (Osero's 3006 lands on Jumper Earn's
     # Li.Fi deposit adapter on base/arbitrum/optimism — 58 of its 65 events) and
     # Skybase's 1inch entrypoint program (the routers share one address on every

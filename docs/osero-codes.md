@@ -2,6 +2,8 @@
 
 **Date:** 2026-09-02. Branch `osero-venues`. Companion to
 [`osero-looping-vault.md`](osero-looping-vault.md) (3009, Morpho custody perimeter).
+The newer Yuzu looping account using code 3000 is documented in
+[`yuzu-looping-vault.md`](yuzu-looping-vault.md).
 
 Osero's team lists six codes as active: **3000, 3002, 3006, 3007, 3008, 3009**.
 This note records the on-chain census we ran to check that every one of them is

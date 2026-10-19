@@ -152,6 +152,49 @@ def test_third_party_supply_credits_and_warns(caplog):
     assert any("third-party SupplyCollateral" in m for m in caplog.messages)
 
 
+def test_yuzu_separate_mint_and_supply_txs_keep_code_3000(caplog):
+    """Yuzu's live shape: the account mints with Referral(3000), then calls
+    its expected helper in a later transaction to supply the shares to Morpho.
+    Last-referral-wins carries 3000 onto the resulting custody balance.
+    """
+    yuzu = custody.OSERO_YUZU_LOOPING
+    mint = [_tr("0xmint", 1, events.ZERO_ADDR, yuzu.strategy, 100.0)]
+    refs = [_ref("0xmint", 2, yuzu.strategy, 3000)]
+    helper = next(iter(yuzu.expected_callers))
+    # Live ordering is account -> helper, SupplyCollateral, helper -> Morpho.
+    # The helper is only a zero-duration pass-through; Morpho is excluded.
+    supply = [
+        _tr("0xsupply", 1, yuzu.strategy, helper, 100.0,
+            ts=DAY + 60, block=101),
+        _tr("0xsupply", 3, helper, MORPHO, 100.0,
+            ts=DAY + 60, block=101),
+    ]
+    position = [_sup("0xsupply", 2, helper, yuzu.strategy, 100.0,
+                     ts=DAY + 60, block=101)]
+
+    with caplog.at_level("WARNING"):
+        legs = template_ab.legs_from_rows(
+            T, refs, mint + supply, END, custody_rows=[(yuzu, position)])
+    mine = legs[legs["user_addr"] == yuzu.strategy]
+    assert float(mine["amount_change"].sum()) == 100.0
+    helper_legs = legs[legs["user_addr"] == helper]
+    assert float(helper_legs["amount_change"].sum()) == 0.0
+    counted = legs[~legs["user_addr"].isin(template_ab.TEMPLATE_A_EXCLUDED)]
+    assert float(counted["amount_change"].sum()) == 100.0
+    out = twa.compute_twa(mine, fill_through=date(2025, 1, 2))
+    assert set(out["ref_code"]) == {3000}
+    assert not any("third-party SupplyCollateral" in m for m in caplog.messages)
+
+
+def test_both_osero_custody_perimeters_are_wired_on_susds():
+    from run_source import SPECS
+
+    assert SPECS["susds_eth"].custody == (
+        custody.OSERO_GTSKYLOOPING,
+        custody.OSERO_YUZU_LOOPING,
+    )
+
+
 def test_window_filter_applies_to_custody_legs():
     mo = [_sup("0xt1", 1, STRAT, STRAT, 50.0, ts=END + 10, block=999)]
     bal, _ = _balance([], [], mo)
