@@ -69,6 +69,10 @@ class CustodyPerimeter:
     blockchain: str
     token: str        # the tracked token the venue holds as collateral (lower-cased)
     strategy: str     # the position owner (onBehalf / borrower), lower-cased
+    # Contracts the strategy deliberately calls to execute Morpho actions.
+    # A different caller still counts (the position belongs to ``strategy``),
+    # but raises the third-party-supply review canary below.
+    expected_callers: frozenset[str] = frozenset()
 
 
 # Osero (codes 3000-3999) gtSkyLooping — sUSDS looped as Morpho collateral.
@@ -77,6 +81,19 @@ OSERO_GTSKYLOOPING = CustodyPerimeter(
     "osero_gtskylooping", "ethereum",
     "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd",
     "0xea40de595f099ca04695b0ca105499e50af77f92",
+)
+
+# Yuzu looping account for Osero. It deposits into sUSDS with real on-chain
+# Referral(3000) events, then supplies the shares through its execution helper
+# into Morpho Blue with this address as ``onBehalf``. Active from 2026-10-12;
+# the all-history event census is documented in docs/yuzu-looping-vault.md.
+OSERO_YUZU_LOOPING = CustodyPerimeter(
+    "osero_yuzu_looping", "ethereum",
+    "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd",
+    "0x015cc48cc8bc37d80aaff4e43061dbaf94192308",
+    expected_callers=frozenset({
+        "0x38b0c12ab81976e9417d4ebfe2a34db6df22e6ad",
+    }),
 )
 
 
@@ -135,7 +152,10 @@ def custody_legs(
         if r.topic0 == SUPPLY_COLLATERAL_TOPIC0:
             amount = events.decode_uint(h[0:64]) / scale
             caller = events.topic_to_addr(r.topic2)
-            if caller != perimeter.strategy:
+            if (
+                caller != perimeter.strategy
+                and caller not in perimeter.expected_callers
+            ):
                 _LOG.warning(
                     "custody[%s]: third-party SupplyCollateral by %s in tx %s — "
                     "credited to custody; under last-referral-wins it inherits the "
