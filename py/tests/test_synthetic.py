@@ -18,7 +18,7 @@ docs/cowswap-1003-double-attribution.md:
 from __future__ import annotations
 
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -229,7 +229,7 @@ def test_reroute_forwarder_code_to_recipient():
     assert tags == {("0xt1", A): (2, 1004)}
 
 
-def test_single_event_owner_not_treated_as_intermediary():
+def test_single_event_owner_not_treated_as_intermediary_for_generic_code():
     """An END USER can own an allowlisted code (aggregator passed
     receiver=user). If they forward in the same tx, re-routing must NOT fire
     onto their transfer recipient — one-off owners are not intermediaries."""
@@ -450,6 +450,83 @@ def test_entrypoint_window_and_precedence_with_4011_reroute():
     assert synthetic_referrals(rows, (windowed.resolve_from_rows(rows),)) == {}
 
 
+def test_real_1020_single_event_forwarder_is_rerouted_from_inception():
+    """Real 1020 emitters include one-off adapters, so the code-specific rule
+    must not wait for the generic three-event intermediary threshold."""
+    start = int(datetime(2026, 8, 24, tzinfo=timezone.utc).timestamp())
+    rows = [_tr("0xreal", 2, EXEC, A, 10.0, ts=start)]
+    refs = [_ref("0xreal", 1, EXEC, 1020, ts=start)]
+    assert rerouted_referrals(refs, rows, REROUTED_CODES) == {
+        ("0xreal", A): (2, 1020),
+    }
+    before = start - 1
+    assert rerouted_referrals(
+        [_ref("0xold", 1, EXEC, 1020, ts=before)],
+        [_tr("0xold", 2, EXEC, A, 10.0, ts=before)],
+        REROUTED_CODES,
+    ) == {}
+
+
+def test_real_1020_direct_holder_keeps_ordinary_referral():
+    start = int(datetime(2026, 8, 24, tzinfo=timezone.utc).timestamp())
+    rows = [_tr("0xdirect", 1, "0x" + "0" * 40, A, 10.0, ts=start)]
+    refs = [_ref("0xdirect", 2, A, 1020, ts=start)]
+    assert rerouted_referrals(refs, rows, REROUTED_CODES) == {}
+    legs = template_ab.legs_from_rows(
+        SUSDS, refs, rows, start + 86400, reroute=REROUTED_CODES)
+    assert legs.iloc[0]["user_addr"] == A
+    assert legs.iloc[0]["ref_code"] == 1020
+
+
+def test_real_1020_dust_retaining_forwarder_is_rerouted():
+    """Observed adapters retain sub-0.1% dust; forwarded shares must still
+    inherit 1020 while the residual remains attributed on the owner."""
+    start = int(datetime(2026, 8, 24, tzinfo=timezone.utc).timestamp())
+    zero = "0x" + "0" * 40
+    rows = [
+        _tr("0xdust", 1, zero, EXEC, 100.0, ts=start),
+        _tr("0xdust", 3, EXEC, A, 99.9, ts=start),
+    ]
+    refs = [_ref("0xdust", 2, EXEC, 1020, ts=start)]
+    assert rerouted_referrals(refs, rows, REROUTED_CODES) == {
+        ("0xdust", A): (3, 1020),
+    }
+
+
+def test_real_1020_materially_retaining_owner_is_not_rerouted():
+    start = int(datetime(2026, 8, 24, tzinfo=timezone.utc).timestamp())
+    zero = "0x" + "0" * 40
+    rows = [
+        _tr("0xretain", 1, zero, EXEC, 100.0, ts=start),
+        _tr("0xretain", 3, EXEC, A, 98.0, ts=start),
+    ]
+    refs = [_ref("0xretain", 2, EXEC, 1020, ts=start)]
+    assert rerouted_referrals(refs, rows, REROUTED_CODES) == {}
+
+
+def test_real_1020_follows_forwarder_hop_and_does_not_double_synthetic_tag():
+    """The first one-off 1inch-router event used router -> hop -> holder. A
+    simultaneous entrypoint fallback resolves to the same mapping key/code,
+    yielding one ordinary balance leg rather than a second reward position."""
+    hop = "0x0889e9327b98d7d1be3c301a4585ff3330502c9a"
+    start = int(datetime(2026, 9, 1, tzinfo=timezone.utc).timestamp())
+    rows = [
+        _tr_to("0xboth", 2, EXEC, hop, 10.0, V6, ts=start),
+        _tr_to("0xboth", 3, hop, A, 10.0, V6, ts=start),
+    ]
+    refs = [_ref("0xboth", 1, EXEC, 1020, ts=start)]
+    prog = ONEINCH_OPEN.resolve_from_rows(rows)
+    rerouted = rerouted_referrals(refs, rows, REROUTED_CODES)
+    pseudo = synthetic_referrals(rows, (prog,))
+    assert rerouted == pseudo == {("0xboth", A): (3, 1020)}
+    legs = template_ab.legs_from_rows(
+        SUSDS, refs, rows, start + 86400, (prog,), REROUTED_CODES)
+    holder_legs = legs[legs["user_addr"] == A]
+    assert len(holder_legs) == 1
+    assert holder_legs.iloc[0]["amount_change"] == 10.0
+    assert holder_legs.iloc[0]["ref_code"] == 1020
+
+
 def test_entrypoint_program_wired_and_provisional_start():
     from run_source import SPECS
     for src in ("susds_eth", "susdc", "susdc_mar", "susdc_jun"):
@@ -556,14 +633,14 @@ def test_reroute_start_gates_by_delivery_date():
     rf = rf + _warm(J, 3006)
     assert rerouted_referrals(rf, tr, REROUTED_CODES, start_by_code={3006: date(2025, 1, 2)}) == {}
     assert rerouted_referrals(rf, tr, REROUTED_CODES, start_by_code={3006: date(2025, 1, 1)}) == {("0xt1", A): (4, 3006)}
-    assert template_ab.REROUTE_START == {}                     # from genesis until ops decides
+    assert template_ab.REROUTE_START == {1020: date(2026, 8, 24)}
 
 
 def test_susdc_reroute_is_3006_only():
     from run_source import SPECS
     for src in ("susdc", "susdc_mar", "susdc_jun"):
         assert SPECS[src].reroute == frozenset({3006}), src
-    assert 1004 in SPECS["susds_eth"].reroute and 4011 in SPECS["susds_eth"].reroute
+    assert {1004, 4011, 1020} <= SPECS["susds_eth"].reroute
 
 
 def test_scan_chains_includes_lifi_origin_chains():

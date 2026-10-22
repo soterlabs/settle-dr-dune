@@ -61,7 +61,8 @@ SPECS: dict[str, SourceSpec] = {
     "stusds": SourceSpec(template_ab, [template_ab.STUSDS], 7877544),
     # Template A — sUSDS / sUSDC (protocol-holder exclusions). sUSDS eth also
     # carries the aggregator programs: CowSwap 1003 (delivery pseudo-referrals)
-    # and the re-routed router codes 1004 Paraswap / 4011 1inch — see
+    # and the re-routed router codes 1004 Paraswap / 4011 1inch / genuine 1020
+    # Skybase referrals — see
     # docs/cowswap-1003-double-attribution.md + docs/adding-an-aggregator.md.
     # ...plus the Li.Fi integrator-anchored program for Osero's frontend (3900,
     # docs/lifi-oserofrontend.md) and Skybase's 1inch entrypoint program (1020,

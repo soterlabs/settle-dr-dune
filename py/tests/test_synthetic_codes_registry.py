@@ -50,8 +50,8 @@ def test_payable_view_matches_the_runtime_exclusion_set():
     assert monthly.NON_PAYABLE_CODES == registry_excluded
 
 
-def test_real_emitted_reroutes_are_not_synthetic_codes():
-    assert template_ab.REROUTED_CODES.isdisjoint(registry.SYNTHETIC_CODES)
+def test_only_documented_dual_origin_code_overlaps_synthetic_and_emitted():
+    assert template_ab.REROUTED_CODES & registry.SYNTHETIC_CODES.keys() == {1020}
 
 
 def test_documentation_matches_registry_metadata():
