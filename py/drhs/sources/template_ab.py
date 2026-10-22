@@ -141,9 +141,10 @@ class EntrypointProgram:
 
 
 # Skybase's 1inch program: swaps entering through the 1inch AggregationRouter
-# (v4 / v5 / v6 — the entrypoints ops listed, 2026-09-02). PROVISIONAL start =
-# the first unsettled month, so enabling it re-attributes no paid month by
-# default; ops picks the eligibility start from the full-history measurement in
+# (v4 / v5 / v6 — the entrypoints ops listed, 2026-09-02). This synthetic
+# fallback starts with September, the first unsettled month when it was added.
+# Code 1020 is dual-origin: genuine Referral(1020) events started on 2026-08-24
+# and are independently re-routed below, including in August. See
 # docs/oneinch-1020-skybase.md. NB 1inch's own code 4011 (executor Referral,
 # re-routed) keeps precedence in the few txs that carry it (24 of 4,025).
 ONEINCH_SKYBASE = EntrypointProgram(
@@ -329,6 +330,8 @@ REROUTED_CODES: frozenset[int] = frozenset({
             # the shares to the LiFiDiamond, which delivers them to the user — a
             # TWO-hop forward, hence the hop-following below. sUSDS-eth + sUSDC L2s.
             # See docs/osero-codes.md.
+    1020,   # Skybase: genuine Referral events land on 1inch routers/executors
+            # and other swap adapters before the shares reach the end holder.
 })
 
 
@@ -342,20 +345,35 @@ REROUTED_CODES: frozenset[int] = frozenset({
 # genesis every run, a new router crosses the threshold retroactively.
 MIN_INTERMEDIARY_EVENTS = 3
 
+# A Referral(1020) owner is an integration forwarder by program design. Some
+# adapters are used only once, so requiring the generic three-event router
+# threshold would silently lose those deposits. The net-positive guard below
+# still leaves a direct holder untouched; this exception only re-routes an
+# owner that forwards its shares in the same transaction.
+REROUTE_SINGLE_EVENT_CODES: frozenset[int] = frozenset({1020})
+
+# Maximum same-transaction remainder that still counts as forwarding, in bps
+# of the owner's gross incoming shares. Three observed 1020 adapters retained
+# 0.02–0.10% execution dust while delivering the rest. Generic reroutes retain
+# their strict net <= 0 rule; a genuine 1020 holder retaining >1% stays put.
+REROUTE_MAX_RETAINED_BPS: dict[int, int] = {1020: 100}
+
 # Codes whose re-route FOLLOWS net-zero forwarders: owner -> hop -> ... -> user.
 # The default (1004, 4011) is the one-hop rule the settled months were paid
 # under — router -> user directly — and must stay byte-identical. 3006 needs
 # two hops (Jumper's deposit adapter -> LiFiDiamond -> user). Opt-in per code
 # so enabling it for a new partner can never re-attribute a settled month of
 # another.
-REROUTE_FOLLOW_HOPS: frozenset[int] = frozenset({3006})
+REROUTE_FOLLOW_HOPS: frozenset[int] = frozenset({3006, 1020})
 
 # Per-code eligibility start for re-routed codes (delivery date >= start).
 # Re-routing replays from genesis, so without this a newly allowlisted code
 # re-attributes every settled month it appears in. Absent = from genesis; the
 # ops decision for 3006 (retroactive, or from a given settlement) is one entry
 # here. Mirrors SyntheticProgram.start / EntrypointProgram.start.
-REROUTE_START: dict[int, date] = {}
+REROUTE_START: dict[int, date] = {
+    1020: date(2026, 8, 24),  # first observed genuine Referral(1020)
+}
 
 # sUSDC sources re-route ONLY 3006 (Jumper Earn deposits land there); 1004 /
 # 4011 have never emitted on sUSDC and enabling them there would expose settled
@@ -409,7 +427,7 @@ def rerouted_referrals(
         if st is not None and datetime.fromtimestamp(r.block_time, tz=timezone.utc).date() < st:
             continue  # before the code's eligibility start — not re-routed
         owner = events.topic_to_addr(r.topic2)
-        if owner not in intermediaries:
+        if owner not in intermediaries and code not in REROUTE_SINGLE_EVENT_CODES:
             continue  # likely an end user owning the code, not a router
         per_tx = owner_code.setdefault(r.transaction_hash, {})
         prev = per_tx.get(owner)
@@ -420,6 +438,7 @@ def rerouted_referrals(
 
     # 2. net deltas + the outgoing-transfer graph, over those txs
     net: dict[tuple[str, str], int] = {}
+    incoming: dict[tuple[str, str], int] = {}
     outgoing: dict[str, dict[str, list[tuple[int, str]]]] = {}   # tx -> from -> [(li, to)]
     for r in tr_rows:
         tx = r.transaction_hash
@@ -430,6 +449,7 @@ def rerouted_referrals(
         to = events.topic_to_addr(r.topic2)
         if to != events.ZERO_ADDR:
             net[(tx, to)] = net.get((tx, to), 0) + amt
+            incoming[(tx, to)] = incoming.get((tx, to), 0) + amt
         if frm != events.ZERO_ADDR:
             net[(tx, frm)] = net.get((tx, frm), 0) - amt
             if to != events.ZERO_ADDR:
@@ -448,8 +468,11 @@ def rerouted_referrals(
         if not edges:
             continue
         for owner, (_li, code) in owners.items():
-            if net.get((tx, owner), 0) > 0:
-                continue  # owner retains (partner vault) — keep its attribution
+            retained = net.get((tx, owner), 0)
+            max_bps = REROUTE_MAX_RETAINED_BPS.get(code, 0)
+            gross_in = incoming.get((tx, owner), 0)
+            if retained > 0 and (gross_in <= 0 or retained * 10_000 > gross_in * max_bps):
+                continue  # owner retains materially (partner vault) — keep its attribution
             chase = code in follow_hops
             # best_since[hop] = the EARLIEST log_index at which the hop was
             # funded along any path: a hop's onward transfers count only if
@@ -723,8 +746,9 @@ def _legs_for_target(
             history_from, to_block,
         ).rows
         cutoff_ts = midnight_ts(scan_start)
-        before = reroute_intermediaries(ref_rows, reroute, before_ts=cutoff_ts)
-        through_end = reroute_intermediaries(ref_rows, reroute)
+        threshold_codes = reroute - REROUTE_SINGLE_EVENT_CODES
+        before = reroute_intermediaries(ref_rows, threshold_codes, before_ts=cutoff_ts)
+        through_end = reroute_intermediaries(ref_rows, threshold_codes)
         if before != through_end:
             changed = sorted(through_end.symmetric_difference(before))
             from ..state_checkpoint import FullReplayRequired

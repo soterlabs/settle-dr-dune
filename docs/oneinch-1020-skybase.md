@@ -1,4 +1,4 @@
-# Skybase via 1inch (code 1020): entrypoint-anchored aggregator program
+# Skybase code 1020: emitted referrals plus 1inch entrypoint fallback
 
 **Date:** 2026-09-02. Branch `osero-venues`. Program
 `template_ab.ONEINCH_SKYBASE`, wired on `susds_eth`. Entrypoints (from ops):
@@ -49,6 +49,29 @@ window and last-wins termination are the shared rules.
 Fixtures carry no `tx_to` (defaults to `None`) → entrypoint programs resolve
 to an empty tx set offline, so Dune-parity replays are untouched.
 
+### Genuine Referral(1020) events
+
+Code 1020 is not purely synthetic. The first genuine event on sUSDS was
+emitted at **2026-08-24 20:58:23 UTC** (Ethereum block 25,827,582, transaction
+`0x03dd97c49ca85a1b0b805ae5dad0546897542986d0f1379bf48a091f29812869`).
+Through Ethereum block 26,249,496 (2026-10-22 audit), sUSDS emitted **31** such
+events across 30 transactions and five owners. The owners retained only
+5.6537 of 107,291.3925 minted sUSDS; **99.9947% was forwarded**.
+
+Those events use the same allowlisted reroute mechanism as other emitted
+aggregator codes. Code 1020 is eligible from 2026-08-24, accepts one-off
+forwarders (two observed owners emitted only once), and follows net-zero hops.
+The latter is required by the observed router → hop → holder transaction on
+2026-08-31. Three forwarders retained 0.02–0.10% execution dust; the 1020 rule
+therefore permits a remainder of at most 1% of the owner's gross incoming
+shares. An owner retaining more than that is not rerouted and keeps the
+ordinary real referral.
+
+This does not create a second reward position. Real, rerouted, and synthetic
+signals merge by `(transaction, holder)` before transfer legs are built. When
+an emitted 1020 and the September entrypoint fallback identify the same holder,
+they resolve to the same code on the same balance leg.
+
 ## Interaction with 1inch's own code 4011
 
 4011 is 1inch's partner code: its executors emit `Referral(4011)` and the code
@@ -63,12 +86,15 @@ routers (the rest are Fusion settlement `0x2d83…aded`). If Skybase should win
 in those 24 as well, that is an explicit precedence change for ops — not made
 here.
 
-## Eligibility window — PROVISIONAL
+## Eligibility windows
 
-`start = 2026-09-01` (the first unsettled month). Enabling the program from
+- Genuine emitted 1020 referrals: **2026-08-24**, their on-chain inception.
+- Synthetic 1inch entrypoint fallback: **2026-09-01**, the first unsettled
+  month when the fallback was introduced.
+
+The synthetic boundary remains intentional: enabling the fallback from full
 history would re-attribute settled Skybase/untagged months (1inch volume runs
-back to Dec 2024); the full-history measurement below is provided so ops can
-choose a start date knowingly — moving it is one constant.
+back to Dec 2024).
 
 ## Known gaps
 
@@ -84,6 +110,21 @@ choose a start date knowingly — moving it is one constant.
   PSM3 (Template C) would need the analogous `tx_to` hook — not done.
 
 ## Impact (full history, measured)
+
+Adding forwarding-aware handling for the genuine events changes nine holders
+and 24 balance legs. Relative to the prior production stream, the exact DR
+deltas are **+$37.842607 for 1020 in August 2026** and **+$87.825619 in
+September 2026**. These amounts are reattributions, not new balances: the
+corresponding deltas across all codes sum to zero in each month.
+
+Because this changes historical attribution before the September 1 boundary,
+the checkpoint fingerprint intentionally rejects the pre-change checkpoint
+set. Rebuild month-end state before using incremental execution for a later
+close; this PR does not rewrite committed settlement outputs.
+
+The table below is the earlier full-history measurement of the synthetic
+entrypoint fallback alone; it is retained to document why that fallback starts
+on September 1.
 
 Method as for CowSwap 1003 / Osero 3006: the program enabled for the FULL
 history (no eligibility start) vs the production baseline (CowSwap 1003 +

@@ -198,9 +198,11 @@ Per-token migration off Dune onto Envio HyperSync:
 - **Custody perimeters** (`drhs/sources/custody.py`) — a strategy's named Morpho
   position counted as still held (Osero 3009, `docs/osero-looping-vault.md`).
 - **Re-routed intermediary codes** (`template_ab.REROUTED_CODES`) — 1004 / 4011 /
-  **3006**; codes in `REROUTE_FOLLOW_HOPS` (3006) chase net-zero forwarders
-  transitively (Jumper adapter → LiFiDiamond → user). Wired on `susds_eth` and
-  the sUSDC sources. `docs/osero-codes.md`.
+  **3006 / 1020**; codes in `REROUTE_FOLLOW_HOPS` (3006, 1020) chase net-zero
+  forwarders transitively. Code 1020 is dual-origin: genuine events from
+  August 24 plus the September-onward entrypoint fallback. Wired on `susds_eth`;
+  3006 is also wired on the sUSDC sources. `docs/osero-codes.md`,
+  `docs/oneinch-1020-skybase.md`.
 - **Tx-anchored synthetic programs** (`SyntheticProgram.txs`) — a router's
   deliveries tagged only inside the program's own txs. Two anchors:
   integrator id on the router's events (`drhs/sources/lifi.py`, Li.Fi
