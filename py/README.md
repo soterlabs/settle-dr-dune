@@ -199,16 +199,15 @@ Per-token migration off Dune onto Envio HyperSync:
   position counted as still held (Osero 3009, `docs/osero-looping-vault.md`).
 - **Re-routed intermediary codes** (`template_ab.REROUTED_CODES`) — 1004 / 4011 /
   **3006 / 1020**; codes in `REROUTE_FOLLOW_HOPS` (3006, 1020) chase net-zero
-  forwarders transitively. Code 1020 is dual-origin: genuine events from
-  August 24 plus the September-onward entrypoint fallback. Wired on `susds_eth`;
-  3006 is also wired on the sUSDC sources. `docs/osero-codes.md`,
+  forwarders transitively. Code 1020 uses genuine events from August 24; public
+  1inch entrypoints are explicitly not attribution evidence. Wired on
+  `susds_eth`; 3006 is also wired on the sUSDC sources. `docs/osero-codes.md`,
   `docs/oneinch-1020-skybase.md`.
 - **Tx-anchored synthetic programs** (`SyntheticProgram.txs`) — a router's
-  deliveries tagged only inside the program's own txs. Two anchors:
-  integrator id on the router's events (`drhs/sources/lifi.py`, Li.Fi
-  `oserofrontend` → 3900, `docs/lifi-oserofrontend.md`) and tx entrypoint
-  (`template_ab.EntrypointProgram`, 1inch routers → Skybase 1020,
-  `docs/oneinch-1020-skybase.md`; `Transfer` rows fetched with the tx join).
+  deliveries tagged only inside transactions carrying a partner-specific
+  signal. Li.Fi's integrator id anchors `oserofrontend` → 3900
+  (`drhs/sources/lifi.py`, `docs/lifi-oserofrontend.md`). A public transaction
+  entrypoint alone is explicitly insufficient.
 - **Grove USDS farm** (`template_d.GROVE`) — fourth Template-D staking farm,
   added after the original Dune-parity fixture. Its `Staked`/`Withdrawn` and
   `Referral` history is replayed from June 2026; see `docs/grove-usds-farm.md`.

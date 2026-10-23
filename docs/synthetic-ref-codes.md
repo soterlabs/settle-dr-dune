@@ -7,11 +7,9 @@ PSM3 `Swap` event.
 “Synthetic” means the numeric code itself was introduced by this pipeline. It
 does not mean the attribution lacks on-chain evidence: holder codes measure
 on-chain balances, while pseudo-referrals use allowlisted transaction or
-delivery evidence. Conversely, `1004`, `3006`, and `4011` are **not** synthetic
-codes. They are emitted on-chain and only rerouted from an intermediary to the
-final recipient. `1020` is deliberately dual-origin: genuine emitted referrals
-are rerouted from 2026-08-24, while the 1inch entrypoint fallback covers
-otherwise-untagged eligible transactions from 2026-09-01.
+delivery evidence. Conversely, `1004`, `3006`, `4011`, and `1020` are **not**
+synthetic codes. They are emitted on-chain and only rerouted from an
+intermediary to the final recipient.
 
 | Code | Name | Mechanism | In Payable view | Meaning |
 |---:|---|---|:---:|---|
@@ -24,7 +22,6 @@ otherwise-untagged eligible transactions from 2026-09-01.
 | 10000 | l2_default_zero | reclassification | No | L2 PSM3 code-0 balance held by an ordinary user |
 | 10001 | l2_contract_zero | reclassification | No | L2 PSM3 code-0 balance held by an allowlisted protocol contract |
 | 1003 | cowswap | pseudo_referral | Yes | CowSwap delivery inferred from its settlement contract |
-| 1020 | skybase_oneinch | pseudo_referral | Yes | Skybase activity from emitted referrals or a 1inch entrypoint fallback |
 | 3900 | osero_lifi | pseudo_referral | Yes | Osero frontend delivery inferred from Li.Fi integrator events |
 | 1997 | skybase_pendle | holder | Yes | Pendle SY-sUSDS backing attributed to Skybase |
 | 1998 | skybase_flagship | holder | Yes | Morpho USDS Flagship position attributed to Skybase |

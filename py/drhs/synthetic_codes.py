@@ -1,10 +1,9 @@
 """Audited registry of every referral code created by this pipeline.
 
 Codes absent from this registry are expected to come from an on-chain
-``Referral`` or PSM3 ``Swap`` event. Re-routed codes such as 1004, 3006, and
-4011 are deliberately absent: attribution changes, but those codes were
-emitted on-chain. Code 1020 is the documented exception: it is both a
-September-onward pseudo-referral and a genuine emitted code from 2026-08-24.
+``Referral`` or PSM3 ``Swap`` event. Re-routed codes such as 1004, 3006, 4011,
+and 1020 are deliberately absent: attribution changes, but those codes
+were emitted on-chain.
 
 The production mechanisms retain their local configuration so adding this
 catalog does not invalidate month-end checkpoint fingerprints. Registry tests
@@ -49,8 +48,6 @@ _DEFINITIONS = (
                   "L2 PSM3 code-0 balance held by an allowlisted protocol contract."),
     SyntheticCode(1003, "cowswap", "pseudo_referral", True,
                   "CowSwap delivery inferred from the settlement contract."),
-    SyntheticCode(1020, "skybase_oneinch", "pseudo_referral", True,
-                  "Skybase activity from emitted referrals or a 1inch entrypoint fallback."),
     SyntheticCode(3900, "osero_lifi", "pseudo_referral", True,
                   "Osero frontend delivery inferred from Li.Fi integrator events."),
     SyntheticCode(1997, "skybase_pendle", "holder", True,
