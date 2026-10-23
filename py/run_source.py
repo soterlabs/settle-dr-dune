@@ -61,31 +61,29 @@ SPECS: dict[str, SourceSpec] = {
     "stusds": SourceSpec(template_ab, [template_ab.STUSDS], 7877544),
     # Template A — sUSDS / sUSDC (protocol-holder exclusions). sUSDS eth also
     # carries the aggregator programs: CowSwap 1003 (delivery pseudo-referrals)
-    # and the re-routed router codes 1004 Paraswap / 4011 1inch — see
+    # and the re-routed router codes 1004 Paraswap / 4011 1inch / genuine 1020
+    # Skybase referrals — see
     # docs/cowswap-1003-double-attribution.md + docs/adding-an-aggregator.md.
     # ...plus the Li.Fi integrator-anchored program for Osero's frontend (3900,
-    # docs/lifi-oserofrontend.md) and Skybase's 1inch entrypoint program (1020,
-    # docs/oneinch-1020-skybase.md) — both resolved per target at fetch time.
+    # docs/lifi-oserofrontend.md), resolved per target at fetch time. Skybase
+    # 1020 is real-event-only; public 1inch entrypoints are not partner-specific.
     "susds_eth": SourceSpec(template_ab, [template_ab.SUSDS_ETH], 7877542, excluded=_EXC,
-                            synthetic=(template_ab.COWSWAP, lifi.OSERO_FRONTEND,
-                                       template_ab.ONEINCH_SKYBASE),
+                            synthetic=(template_ab.COWSWAP, lifi.OSERO_FRONTEND),
                             reroute=template_ab.REROUTED_CODES,
                             custody=(custody.OSERO_GTSKYLOOPING,
                                      custody.OSERO_YUZU_LOOPING)),
-    # sUSDC also carries the re-routed codes (Osero's 3006 lands on Jumper Earn's
-    # Li.Fi deposit adapter on base/arbitrum/optimism — 58 of its 65 events) and
-    # Skybase's 1inch entrypoint program (the routers share one address on every
-    # chain; resolved per target from the tx.to join).
+    # sUSDC carries Osero's re-routed 3006 (58 of its 65 Jumper Earn events land
+    # on the Li.Fi deposit adapter on base/arbitrum/optimism). There are no
+    # entrypoint pseudo-referrals: public router addresses do not prove partner
+    # attribution.
     "susdc": SourceSpec(template_ab, template_ab.TEMPLATE_A_SUSDC, 7877542, excluded=_EXC,
-                        reroute=template_ab.SUSDC_REROUTED,
-                        synthetic=(template_ab.ONEINCH_SKYBASE,)),
+                        reroute=template_ab.SUSDC_REROUTED),
     "susdc_mar": SourceSpec(
         template_ab, [template_ab.SUSDC_ETH, template_ab.SUSDC_BASE, template_ab.SUSDC_ARB],
-        7877542, excluded=_EXC, reroute=template_ab.SUSDC_REROUTED,
-        synthetic=(template_ab.ONEINCH_SKYBASE,)),
+        7877542, excluded=_EXC, reroute=template_ab.SUSDC_REROUTED),
     "susdc_jun": SourceSpec(
         template_ab, [template_ab.SUSDC_OPT, template_ab.SUSDC_UNI], 7877542, excluded=_EXC,
-        reroute=template_ab.SUSDC_REROUTED, synthetic=(template_ab.ONEINCH_SKYBASE,)),
+        reroute=template_ab.SUSDC_REROUTED),
     # Template C — L2 sUSDS via PSM3 Swap ref_code (balance from token Transfer).
     "susds_psm3": SourceSpec(template_c, template_c.ALL, 7877543, ref_kind="swaps", excluded=_EXC),
     "susds_psm3_base": SourceSpec(template_c, [template_c.BASE], 7877543, ref_kind="swaps", excluded=_EXC),

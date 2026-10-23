@@ -88,75 +88,6 @@ class SyntheticProgram:
         return (self.start is None or d >= self.start) and (self.end is None or d < self.end)
 
 
-# --- Entrypoint-anchored programs (adding-an-aggregator.md §C) ---------------
-# Aggregators with NO fixed delivery contract: the token reaches the user from a
-# per-solver executor or straight from a pool, so "received FROM a program
-# contract" never fires (1inch on sUSDS-eth: only 435 of 4,025 router txs have
-# a router -> user edge). Only the tx entrypoint (``tx.to``) identifies the
-# program. Resolves per target — from the Transfer rows already fetched with the
-# transaction join, no extra scan — into a SyntheticProgram with ``txs`` set and
-# ``contracts`` EMPTY, which ``synthetic_referrals`` reads as "any incoming
-# transfer (mints included) to a net-positive wallet inside an anchored tx".
-# Known gap: contract-wallet / ERC-4337 users of the frontend have
-# ``tx.to = EntryPoint`` and are invisible to this rule (45 such txs observed).
-@dataclass(frozen=True)
-class EntrypointProgram:
-    name: str
-    ref_code: int
-    entrypoints: frozenset[str]   # router addresses, lower-cased
-    start: date | None = None
-    end: date | None = None
-
-    def resolve_from_rows(self, tr_rows) -> "SyntheticProgram":
-        """Pure core: Transfer rows carrying ``tx_to`` -> the anchored program."""
-        txs = frozenset(r.transaction_hash for r in tr_rows
-                        if r.tx_to in self.entrypoints and r.transaction_hash)
-        return SyntheticProgram(self.name, self.ref_code, frozenset(),
-                                start=self.start, end=self.end, txs=txs)
-
-    def resolve(self, target: "Target", from_block: int, to_block: int, end_ts: int,
-                scan_start: date | None = None,
-                ) -> "SyntheticProgram":
-        """Fetch the target's Transfer rows WITH the transaction join over the
-        program's eligibility window only, and resolve. A separate, bounded
-        query on purpose: joining the pipeline's full Transfer history would
-        re-key its largest cache entries and maintain a second copy forever,
-        for rows the window can never tag."""
-        if self.start is not None:
-            if midnight_ts(self.start) >= end_ts:
-                # window entirely after the scan end (e.g. start = next
-                # settlement): nothing can be tagged — no query at all
-                return self.resolve_from_rows([])
-            from_block = max(from_block, hypersync.block_at_or_genesis(
-                target.blockchain, midnight_ts(self.start)))
-        rows = hypersync.query_logs(
-            target.blockchain,
-            [{"address": [target.address.lower()], "topics": [[events.TRANSFER_TOPIC0]]}],
-            from_block, to_block, with_tx_to=True,
-        ).rows
-        prog = self.resolve_from_rows(rows)
-        _LOG.info("entrypoint[%s] %s: %d Transfer rows in window -> %d anchored txs",
-                  self.name, target.blockchain, len(rows), len(prog.txs))
-        return prog
-
-
-# Skybase's 1inch program: swaps entering through the 1inch AggregationRouter
-# (v4 / v5 / v6 — the entrypoints ops listed, 2026-09-02). PROVISIONAL start =
-# the first unsettled month, so enabling it re-attributes no paid month by
-# default; ops picks the eligibility start from the full-history measurement in
-# docs/oneinch-1020-skybase.md. NB 1inch's own code 4011 (executor Referral,
-# re-routed) keeps precedence in the few txs that carry it (24 of 4,025).
-ONEINCH_SKYBASE = EntrypointProgram(
-    "oneinch_skybase", 1020,
-    frozenset({
-        "0x1111111254fb6c44bac0bed2854e76f90643097d",  # AggregationRouter v4
-        "0x1111111254eeb25477b68fb85ed929f73a960582",  # AggregationRouter v5
-        "0x111111125421ca6dc452d289314280a0f8842a65",  # AggregationRouter v6
-    }),
-    start=date(2026, 9, 1),
-)
-
-
 # CowSwap GPv2Settlement — same address on every chain it is deployed to.
 # Assumption (verified on ethereum): sUSDS only leaves the settlement contract
 # during `settle()`/`swap()` executions, so no separate Trade-event check is
@@ -329,6 +260,8 @@ REROUTED_CODES: frozenset[int] = frozenset({
             # the shares to the LiFiDiamond, which delivers them to the user — a
             # TWO-hop forward, hence the hop-following below. sUSDS-eth + sUSDC L2s.
             # See docs/osero-codes.md.
+    1020,   # Skybase: genuine Referral events land on 1inch routers/executors
+            # and other swap adapters before the shares reach the end holder.
 })
 
 
@@ -342,20 +275,35 @@ REROUTED_CODES: frozenset[int] = frozenset({
 # genesis every run, a new router crosses the threshold retroactively.
 MIN_INTERMEDIARY_EVENTS = 3
 
+# A Referral(1020) owner is an integration forwarder by program design. Some
+# adapters are used only once, so requiring the generic three-event router
+# threshold would silently lose those deposits. The net-positive guard below
+# still leaves a direct holder untouched; this exception only re-routes an
+# owner that forwards its shares in the same transaction.
+REROUTE_SINGLE_EVENT_CODES: frozenset[int] = frozenset({1020})
+
+# Maximum same-transaction remainder that still counts as forwarding, in bps
+# of the owner's gross incoming shares. Three observed 1020 adapters retained
+# 0.02–0.10% execution dust while delivering the rest. Generic reroutes retain
+# their strict net <= 0 rule; a genuine 1020 holder retaining >1% stays put.
+REROUTE_MAX_RETAINED_BPS: dict[int, int] = {1020: 100}
+
 # Codes whose re-route FOLLOWS net-zero forwarders: owner -> hop -> ... -> user.
 # The default (1004, 4011) is the one-hop rule the settled months were paid
 # under — router -> user directly — and must stay byte-identical. 3006 needs
 # two hops (Jumper's deposit adapter -> LiFiDiamond -> user). Opt-in per code
 # so enabling it for a new partner can never re-attribute a settled month of
 # another.
-REROUTE_FOLLOW_HOPS: frozenset[int] = frozenset({3006})
+REROUTE_FOLLOW_HOPS: frozenset[int] = frozenset({3006, 1020})
 
 # Per-code eligibility start for re-routed codes (delivery date >= start).
 # Re-routing replays from genesis, so without this a newly allowlisted code
 # re-attributes every settled month it appears in. Absent = from genesis; the
 # ops decision for 3006 (retroactive, or from a given settlement) is one entry
-# here. Mirrors SyntheticProgram.start / EntrypointProgram.start.
-REROUTE_START: dict[int, date] = {}
+# here. Mirrors SyntheticProgram.start.
+REROUTE_START: dict[int, date] = {
+    1020: date(2026, 8, 24),  # first observed genuine Referral(1020)
+}
 
 # sUSDC sources re-route ONLY 3006 (Jumper Earn deposits land there); 1004 /
 # 4011 have never emitted on sUSDC and enabling them there would expose settled
@@ -409,7 +357,7 @@ def rerouted_referrals(
         if st is not None and datetime.fromtimestamp(r.block_time, tz=timezone.utc).date() < st:
             continue  # before the code's eligibility start — not re-routed
         owner = events.topic_to_addr(r.topic2)
-        if owner not in intermediaries:
+        if owner not in intermediaries and code not in REROUTE_SINGLE_EVENT_CODES:
             continue  # likely an end user owning the code, not a router
         per_tx = owner_code.setdefault(r.transaction_hash, {})
         prev = per_tx.get(owner)
@@ -420,6 +368,7 @@ def rerouted_referrals(
 
     # 2. net deltas + the outgoing-transfer graph, over those txs
     net: dict[tuple[str, str], int] = {}
+    incoming: dict[tuple[str, str], int] = {}
     outgoing: dict[str, dict[str, list[tuple[int, str]]]] = {}   # tx -> from -> [(li, to)]
     for r in tr_rows:
         tx = r.transaction_hash
@@ -430,6 +379,7 @@ def rerouted_referrals(
         to = events.topic_to_addr(r.topic2)
         if to != events.ZERO_ADDR:
             net[(tx, to)] = net.get((tx, to), 0) + amt
+            incoming[(tx, to)] = incoming.get((tx, to), 0) + amt
         if frm != events.ZERO_ADDR:
             net[(tx, frm)] = net.get((tx, frm), 0) - amt
             if to != events.ZERO_ADDR:
@@ -448,8 +398,11 @@ def rerouted_referrals(
         if not edges:
             continue
         for owner, (_li, code) in owners.items():
-            if net.get((tx, owner), 0) > 0:
-                continue  # owner retains (partner vault) — keep its attribution
+            retained = net.get((tx, owner), 0)
+            max_bps = REROUTE_MAX_RETAINED_BPS.get(code, 0)
+            gross_in = incoming.get((tx, owner), 0)
+            if retained > 0 and (gross_in <= 0 or retained * 10_000 > gross_in * max_bps):
+                continue  # owner retains materially (partner vault) — keep its attribution
             chase = code in follow_hops
             # best_since[hop] = the EARLIEST log_index at which the hop was
             # funded along any path: a hop's onward transfers count only if
@@ -723,15 +676,16 @@ def _legs_for_target(
             history_from, to_block,
         ).rows
         cutoff_ts = midnight_ts(scan_start)
-        before = reroute_intermediaries(ref_rows, reroute, before_ts=cutoff_ts)
-        through_end = reroute_intermediaries(ref_rows, reroute)
+        threshold_codes = reroute - REROUTE_SINGLE_EVENT_CODES
+        before = reroute_intermediaries(ref_rows, threshold_codes, before_ts=cutoff_ts)
+        through_end = reroute_intermediaries(ref_rows, threshold_codes)
         if before != through_end:
             changed = sorted(through_end.symmetric_difference(before))
             from ..state_checkpoint import FullReplayRequired
             raise FullReplayRequired(
                 "reroute intermediary classification changed after checkpoint: "
                 + ", ".join(changed))
-    # anchored programs (lifi.IntegratorProgram, EntrypointProgram) resolve per
+    # Anchored programs (currently lifi.IntegratorProgram) resolve per
     # target — each fetches its own bounded anchor data — into a concrete
     # SyntheticProgram (tx set + delivery contracts).
     unresolved = [p for p in synthetic if not isinstance(p, SyntheticProgram)]
