@@ -398,56 +398,8 @@ def test_susdc_sources_carry_reroute():
         assert 3006 in SPECS[name].reroute, name
 
 
-# --- entrypoint-anchored programs (1inch → Skybase 1020) -------------------------
-from drhs.sources.template_ab import EntrypointProgram, ONEINCH_SKYBASE  # noqa: E402
-
-V6 = "0x111111125421ca6dc452d289314280a0f8842a65"
+# --- genuine Skybase Referral(1020) events -----------------------------------
 EXEC = "0x5141b82f5ffda4c6fe1e372978f1c5427640a190"   # a 1inch solver executor
-ONEINCH_OPEN = EntrypointProgram("t", 1020, ONEINCH_SKYBASE.entrypoints)  # no window
-
-
-def _tr_to(tx, li, frm, to, amount, tx_to, **kw):
-    r = _tr(tx, li, frm, to, amount, **kw)
-    return LogRow(**{**r.__dict__, "tx_to": tx_to})
-
-
-def test_entrypoint_resolves_from_tx_to():
-    rows = [_tr_to("0xr", 1, EXEC, A, 10.0, V6), _tr_to("0xo", 1, D, A, 10.0, D)]
-    prog = ONEINCH_OPEN.resolve_from_rows(rows)
-    assert isinstance(prog, SyntheticProgram)
-    assert prog.txs == {"0xr"} and prog.contracts == frozenset() and prog.ref_code == 1020
-
-
-def test_entrypoint_tags_any_sender_and_mints_in_anchored_txs():
-    rows = [_tr_to("0xr1", 1, EXEC, A, 10.0, V6),                 # executor delivers
-            _tr_to("0xr2", 1, "0x" + "0" * 40, E, 5.0, V6),      # vault mints straight to user
-            _tr_to("0xr3", 1, V6, D, 3.0, V6),                   # router delivers directly
-            _tr_to("0xo", 1, EXEC, R, 10.0, D)]                  # same executor, other entrypoint
-    prog = ONEINCH_OPEN.resolve_from_rows(rows)
-    tags = synthetic_referrals(rows, (prog,))
-    assert tags == {("0xr1", A): (1, 1020), ("0xr2", E): (1, 1020), ("0xr3", D): (1, 1020)}
-
-
-def test_entrypoint_forwarders_not_tagged():
-    rows = [_tr_to("0xr", 1, "0x" + "0" * 40, EXEC, 10.0, V6),   # mint to executor (net 0)
-            _tr_to("0xr", 2, EXEC, V6, 10.0, V6),                 # router hop (net 0)
-            _tr_to("0xr", 3, V6, A, 10.0, V6)]                    # user (net +)
-    prog = ONEINCH_OPEN.resolve_from_rows(rows)
-    assert synthetic_referrals(rows, (prog,)) == {("0xr", A): (3, 1020)}
-
-
-def test_entrypoint_window_and_precedence_with_4011_reroute():
-    """Inside the window the executor's real Referral(4011), re-routed, beats
-    the 1020 pseudo-tag (settled precedence); a plain 1inch tx gets 1020."""
-    rows = [_tr_to("0xa", 2, EXEC, A, 10.0, V6), _tr_to("0xb", 2, EXEC, D, 10.0, V6)]
-    rf = [_ref("0xa", 1, EXEC, 4011)] + _warm(EXEC, 4011)
-    prog = ONEINCH_OPEN.resolve_from_rows(rows)
-    legs = template_ab.legs_from_rows(SUSDS, rf, rows, DAY + 86400, (prog,), REROUTED_CODES)
-    code = lambda w: set(legs[legs["user_addr"] == w]["ref_code"].dropna().astype(int))
-    assert code(A) == {4011} and code(D) == {1020}
-    # outside the eligibility window nothing is tagged
-    windowed = EntrypointProgram("w", 1020, ONEINCH_SKYBASE.entrypoints, start=date(2025, 1, 2))
-    assert synthetic_referrals(rows, (windowed.resolve_from_rows(rows),)) == {}
 
 
 def test_real_1020_single_event_forwarder_is_rerouted_from_inception():
@@ -504,45 +456,32 @@ def test_real_1020_materially_retaining_owner_is_not_rerouted():
     assert rerouted_referrals(refs, rows, REROUTED_CODES) == {}
 
 
-def test_real_1020_follows_forwarder_hop_and_does_not_double_synthetic_tag():
-    """The first one-off 1inch-router event used router -> hop -> holder. A
-    simultaneous entrypoint fallback resolves to the same mapping key/code,
-    yielding one ordinary balance leg rather than a second reward position."""
+def test_real_1020_follows_forwarder_hop_and_creates_one_holder_leg():
+    """The first one-off 1inch-router event used router -> hop -> holder."""
     hop = "0x0889e9327b98d7d1be3c301a4585ff3330502c9a"
     start = int(datetime(2026, 9, 1, tzinfo=timezone.utc).timestamp())
     rows = [
-        _tr_to("0xboth", 2, EXEC, hop, 10.0, V6, ts=start),
-        _tr_to("0xboth", 3, hop, A, 10.0, V6, ts=start),
+        _tr("0xreal", 2, EXEC, hop, 10.0, ts=start),
+        _tr("0xreal", 3, hop, A, 10.0, ts=start),
     ]
-    refs = [_ref("0xboth", 1, EXEC, 1020, ts=start)]
-    prog = ONEINCH_OPEN.resolve_from_rows(rows)
+    refs = [_ref("0xreal", 1, EXEC, 1020, ts=start)]
     rerouted = rerouted_referrals(refs, rows, REROUTED_CODES)
-    pseudo = synthetic_referrals(rows, (prog,))
-    assert rerouted == pseudo == {("0xboth", A): (3, 1020)}
+    assert rerouted == {("0xreal", A): (3, 1020)}
     legs = template_ab.legs_from_rows(
-        SUSDS, refs, rows, start + 86400, (prog,), REROUTED_CODES)
+        SUSDS, refs, rows, start + 86400, reroute=REROUTED_CODES)
     holder_legs = legs[legs["user_addr"] == A]
     assert len(holder_legs) == 1
     assert holder_legs.iloc[0]["amount_change"] == 10.0
     assert holder_legs.iloc[0]["ref_code"] == 1020
 
 
-def test_entrypoint_program_wired_and_provisional_start():
+def test_no_synthetic_1020_program_is_wired():
     from run_source import SPECS
     for src in ("susds_eth", "susdc", "susdc_mar", "susdc_jun"):
-        names = [getattr(p, "name", None) for p in SPECS[src].synthetic]
-        assert "oneinch_skybase" in names, src
-    assert ONEINCH_SKYBASE.start == date(2026, 9, 1)     # no settled month re-attributed by default
-    assert len(ONEINCH_SKYBASE.entrypoints) == 3
+        assert all(p.ref_code != 1020 for p in SPECS[src].synthetic), src
 
 
-def test_logrow_tx_to_defaults_none_for_fixtures():
-    r = _tr("0xt", 1, S, A, 1.0)
-    assert r.tx_to is None
-    assert ONEINCH_OPEN.resolve_from_rows([r]).txs == frozenset()
-
-
-# --- review fixes: tie rule, temporal hop guard, bounded entrypoint fetch --------
+# --- review fixes: tie rule and temporal hop guard ---------------------------
 
 def test_shared_contract_tie_last_program_in_tuple_wins():
     """Two programs anchored on the same contract AND the same tx: the last
@@ -566,32 +505,6 @@ def test_hop_following_ignores_edges_before_the_hop_was_funded():
     assert tags == {("0xt", U2): (9, 3006)}
 
 
-def test_entrypoint_resolve_fetches_bounded_joined_window(monkeypatch):
-    """resolve() fetches its own Transfer rows WITH the join, from the program's
-    start — never re-keying the pipeline's full Transfer stream."""
-    from drhs import hypersync as hs
-    calls = []
-    def fake_query(chain, selections, fb, tb, **kw):
-        calls.append((fb, tb, kw.get("with_tx_to")))
-        return hs.QueryResult(rows=[_tr_to("0xr", 1, EXEC, A, 1.0, V6)])
-    monkeypatch.setattr(hs, "query_logs", fake_query)
-    monkeypatch.setattr(hs, "find_block_at_or_before", lambda chain, ts: 5_000)   # block at program.start
-    prog = EntrypointProgram("t", 1020, ONEINCH_SKYBASE.entrypoints, start=date(2026, 7, 1))
-    end_ts = 1_785_542_400   # 2026-08-01 00:00 UTC — the window [start, end) is non-empty
-    resolved = prog.resolve(SUSDS, 0, 9_000, end_ts)
-    assert calls == [(5_000, 9_000, True)]          # bounded below by start, joined
-    assert resolved.txs == {"0xr"} and resolved.contracts == frozenset()
-
-
-def test_entrypoint_resolve_skips_query_when_window_is_after_scan_end(monkeypatch):
-    from drhs import hypersync as hs
-    def boom(*a, **k): raise AssertionError("must not query")
-    monkeypatch.setattr(hs, "query_logs", boom); monkeypatch.setattr(hs, "find_block_at_or_before", boom)
-    prog = EntrypointProgram("t", 1020, ONEINCH_SKYBASE.entrypoints, start=date(2026, 9, 1))
-    end_ts_aug = 1_788_220_800   # 2026-09-01 00:00 UTC == the August scan end
-    assert prog.resolve(SUSDS, 0, 9_000, end_ts_aug).txs == frozenset()
-
-
 # --- second review: BFS re-entry, candidate order, per-program skip, REROUTE_START --
 
 def test_hop_following_two_funding_paths_is_order_independent():
@@ -607,14 +520,6 @@ def test_hop_following_two_funding_paths_is_order_independent():
     fwd = rerouted_referrals(rf, rows, REROUTED_CODES)
     rev = rerouted_referrals(rf, list(reversed(rows)), REROUTED_CODES)
     assert fwd == rev == {("0xt", A): (6, 3006), ("0xt", D): (9, 3006)}
-
-
-def test_tie_between_contract_and_entrypoint_program_follows_tuple_order():
-    cow = template_ab.COWSWAP
-    rows = [_tr_to("0xr", 1, S, A, 10.0, V6)]            # CowSwap delivery inside a 1inch-router tx
-    one = ONEINCH_OPEN.resolve_from_rows(rows)
-    assert synthetic_referrals(rows, (cow, one)) == {("0xr", A): (1, 1020)}
-    assert synthetic_referrals(rows, (one, cow)) == {("0xr", A): (1, 1003)}
 
 
 def test_recipient_skip_is_per_program():
