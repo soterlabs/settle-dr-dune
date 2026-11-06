@@ -105,6 +105,20 @@ def test_selling_both_sides_separately_consumes_each_matched_tranche_once():
     assert legs.amount_change.sum() == pytest.approx(60)
 
 
+def test_expiry_switches_from_matched_pair_to_pt_only_without_later_tx():
+    rows = _tagged_wrap() + _split()
+    rows += [_tr(op.YT, S, "0x" + "a" * 40, 44 * 10**18,
+                 tx="0xytsale", idx=1, block=102)]
+    legs = op.replay(rows, op.EXPIRY_TS + 1, expiry_block=200)
+    expiry = legs[legs.ts == op.EXPIRY_TS]
+    assert len(expiry) == 1
+    assert expiry.iloc[0].block == 200
+    # Before expiry the missing YT reduces eligibility to 60 shares. At
+    # maturity all 110 controlled PT units represent the full 100-share claim.
+    assert expiry.iloc[0].amount_change == pytest.approx(40)
+    assert legs.amount_change.sum() == pytest.approx(100)
+
+
 def test_morpho_withdrawal_to_strategy_is_custody_but_external_receiver_is_disposal():
     rows = _tagged_wrap() + _split()
     market = next(iter(op.MORPHO_MARKETS))

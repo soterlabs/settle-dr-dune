@@ -189,7 +189,8 @@ def _matching_transfer(tx_rows, token: str, frm: set[str], to: str,
     return None
 
 
-def replay(rows, end_ts: int, strategies: frozenset[str] = STRATEGIES) -> pd.DataFrame:
+def replay(rows, end_ts: int, strategies: frozenset[str] = STRATEGIES,
+           expiry_block: int | None = None) -> pd.DataFrame:
     """Pure event replay -> positive Osero Pendle balance-change legs.
 
     The state is a referred-first tagged inventory, not a fungible-wallet
@@ -199,14 +200,35 @@ def replay(rows, end_ts: int, strategies: frozenset[str] = STRATEGIES) -> pd.Dat
     states = {s: State() for s in strategies}
     recs: list[dict] = []
     rows = [r for r in _ordered(rows) if r.block_time < end_ts]
+    expired = False
+
+    def apply_expiry(block: int) -> None:
+        nonlocal expired
+        if expired:
+            return
+        for strategy, st in states.items():
+            before = st.pendle
+            st.after_expiry = True
+            delta = st.pendle - before
+            if abs(delta) > 1e-12:
+                recs.append({
+                    "blockchain": "ethereum", "contract_address": SUSDS,
+                    "symbol": "sUSDS", "user_addr": strategy,
+                    "block": block, "log_index": 1_000_000,
+                    "ts": EXPIRY_TS, "amount_change": delta,
+                    "ref_code": st.code if st.code is not None else pd.NA,
+                })
+        expired = True
+
     for _tx, group in groupby(rows, key=lambda r: r.transaction_hash):
         tx_rows = list(group)
         if not tx_rows or tx_rows[0].transaction_hash is None:
             continue
+        if tx_rows[0].block_time >= EXPIRY_TS:
+            apply_expiry(expiry_block or max(0, tx_rows[0].block_number - 1))
         implicated = _strategies_in_tx(tx_rows)
         for strategy in sorted(implicated & strategies):
             st = states[strategy]
-            st.after_expiry = tx_rows[-1].block_time >= EXPIRY_TS
             # A shared router belongs to the account only when this transaction
             # names one reviewed strategy.  Multi-strategy batches get no
             # router custody credit.
@@ -352,6 +374,10 @@ def replay(rows, end_ts: int, strategies: frozenset[str] = STRATEGIES) -> pd.Dat
                     "ref_code": st.code if st.code is not None else pd.NA,
                 })
 
+    if end_ts > EXPIRY_TS:
+        fallback = (max((r.block_number for r in rows), default=0) + 1)
+        apply_expiry(expiry_block or fallback)
+
     columns = ["blockchain", "contract_address", "symbol", "user_addr",
                "block", "log_index", "ts", "amount_change", "ref_code"]
     return pd.DataFrame(recs, columns=columns)
@@ -407,7 +433,9 @@ def fetch_rows(end_date: date):
 
 def build_legs(end_date: date) -> pd.DataFrame:
     rows, end_ts = fetch_rows(end_date)
-    return replay(rows, end_ts)
+    expiry_block = (hypersync.find_block_at_or_before("ethereum", EXPIRY_TS)
+                    if end_ts > EXPIRY_TS else None)
+    return replay(rows, end_ts, expiry_block=expiry_block)
 
 
 def skybase_deductions(osero_legs: pd.DataFrame) -> pd.DataFrame:
