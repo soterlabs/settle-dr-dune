@@ -296,8 +296,14 @@ def replay(rows, end_ts: int, strategies: frozenset[str] = STRATEGIES,
                 if r.address.lower() != SY or r.topic0 != SY_REDEEM:
                     continue
                 caller, receiver, token_out = _addr(r.topic1), _addr(r.topic2), _addr(r.topic3)
-                sy_in, amount_out = _word(r.data, 0) / 1e18, _word(r.data, 1) / 1e18
+                sy_in_raw, amount_out_raw = _word(r.data, 0), _word(r.data, 1)
+                sy_in, amount_out = sy_in_raw / 1e18, amount_out_raw / 1e18
                 if caller not in members:
+                    continue
+                # Validate and consume the corresponding SY movement.  Without
+                # marking it used, the generic disposal pass below subtracts a
+                # partial redemption a second time.
+                if _matching_transfer(tx_rows, SY, members, SY, sy_in_raw, used) is None:
                     continue
                 tagged = min(st.sy, sy_in)
                 st.sy -= tagged
