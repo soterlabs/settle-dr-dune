@@ -105,6 +105,20 @@ def test_selling_both_sides_separately_consumes_each_matched_tranche_once():
     assert legs.amount_change.sum() == pytest.approx(60)
 
 
+def test_partial_sy_redemption_is_not_counted_again_as_generic_disposal():
+    amount = 40 * 10**18
+    token_out = "0x" + "e" * 40
+    rows = _tagged_wrap()
+    rows += [
+        _tr(op.SY, S, op.SY, amount, tx="0xredeem", idx=1, block=102),
+        _row(op.SY, op.SY_REDEEM, tx="0xredeem", idx=2, block=102,
+             topics=(events.addr_to_topic(S), events.addr_to_topic(S),
+                     events.addr_to_topic(token_out)), data=(amount, amount)),
+    ]
+    legs = op.replay(rows, TX_TS + 100)
+    assert legs.amount_change.sum() == pytest.approx(60)
+
+
 def test_expiry_switches_from_matched_pair_to_pt_only_without_later_tx():
     rows = _tagged_wrap() + _split()
     rows += [_tr(op.YT, S, "0x" + "a" * 40, 44 * 10**18,
