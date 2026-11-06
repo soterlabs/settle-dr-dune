@@ -129,9 +129,9 @@ transfers that happen **after** the hop received the shares (earliest funding
 edge along any path, so the result is independent of row order), so an
 unrelated earlier delivery out of a shared router never inherits the code.
 Re-routing replays from genesis; a per-code eligibility start goes in
-`template_ab.REROUTE_START` (delivery date ≥ start) — the same knob
-`SyntheticProgram` / `EntrypointProgram` carry — so allowlisting a code need
-not re-attribute settled months. It is opt-in
+`template_ab.REROUTE_START` (delivery date ≥ start), analogous to a
+`SyntheticProgram` eligibility window, so allowlisting a code need not
+re-attribute settled months. It is opt-in
 per code on purpose — 1004 / 4011 were settled under the direct rule and must stay
 byte-identical. See [`osero-codes.md`](osero-codes.md).
 
@@ -139,26 +139,19 @@ Wire `reroute=template_ab.REROUTED_CODES` on **every source whose token the
 partner deposits into** — `susds_eth` alone missed 58 of 65 Jumper events,
 which were on sUSDC L2s.
 
-### C. Aggregator without a fixed delivery contract (1inch / 0x Settler / Enso shape) — IMPLEMENTED
+### C. Public entrypoint without a partner-specific signal — DO NOT ATTRIBUTE
 
 Delivery comes from rotating per-solver executors or straight from pools
 (1inch on sUSDS-eth: only 11 % of router txs have a router → user edge), so
-shape A cannot see it. Only the tx *entrypoint* (`tx.to`) identifies the
-program. `template_ab.EntrypointProgram(name, code, entrypoints, start, end)`:
+shape A cannot see it. The transaction entrypoint (`tx.to`) identifies the
+public routing infrastructure, but not the partner or frontend that originated
+the activity. It is therefore insufficient attribution evidence by itself.
 
-- the program fetches **its own** `Transfer` rows with the transaction join
-  (`query_logs(..., with_tx_to=True)` → `LogRow.tx_to`) over its eligibility
-  window only, and resolves to `txs = {tx : tx.to ∈ entrypoints}`. The
-  pipeline's full Transfer stream is left alone on purpose: joining it would
-  re-key the largest cache entries and maintain a second copy forever for rows
-  the window can never tag;
-- inside those txs, **every incoming transfer (mints included) to a
-  net-positive wallet** is a delivery; forwarders net to ≤ 0 and are skipped —
-  all other rules and precedence unchanged.
-
-First use: Skybase's 1inch program 1020, [`oneinch-1020-skybase.md`](oneinch-1020-skybase.md).
-Known gap: contract-wallet / ERC-4337 users have `tx.to = EntryPoint`, not the
-router (45 such txs observed).
+The former Skybase 1020 entrypoint program was removed after genuine
+`Referral(1020)` events were identified: only 15 of 31 real events entered via
+the listed router, while router transactions also occurred without the code.
+Use an emitted referral or another partner-specific integrator signal instead.
+See [`oneinch-1020-skybase.md`](oneinch-1020-skybase.md).
 
 ### D. Multi-tenant router with an integrator id (Li.Fi shape) — IMPLEMENTED
 
