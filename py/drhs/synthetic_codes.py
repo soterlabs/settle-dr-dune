@@ -53,7 +53,7 @@ _DEFINITIONS = (
     SyntheticCode(3900, "osero_lifi", "pseudo_referral", True,
                   "Osero frontend delivery inferred from Li.Fi integrator events."),
     SyntheticCode(1997, "skybase_pendle", "holder", True,
-                  "Skybase Pendle SY-sUSDS backing."),
+                  "Residual Pendle SY-sUSDS backing after real-code carve-outs."),
     SyntheticCode(1998, "skybase_flagship", "holder", True,
                   "Skybase Morpho USDS Flagship position."),
     SyntheticCode(1999, "skybase_risk_capital", "holder", True,

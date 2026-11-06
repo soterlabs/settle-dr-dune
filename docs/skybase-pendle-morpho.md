@@ -26,7 +26,12 @@ its ERC20 mint/burn Transfers); those are distinct from Sky Referral marking.
 No PT, YT, or LP balances enter the reward base. The existing ordinary-sUSDS
 exclusion of this SY remains in place. The wrapper is counted once even when
 multiple markets/expiries share it; this is whole-wrapper attribution, not a
-single market's TVL.
+single market's TVL. Starting with the Osero Phase-1 methodology, code 1997 is
+the **residual** wrapper attribution: any reviewed, genuinely Osero-tagged
+shares that remain in the supported Pendle custody perimeter are emitted under
+their explicitly allowlisted real code and deducted from 1997 by an equal and
+opposite leg. This preserves the wrapper total and prevents Skybase/Osero double
+attribution. See [`osero-pendle.md`](osero-pendle.md).
 
 Every run separately replays SY mint/burn Transfers and compares supply to
 sUSDS backing at each block end. Deficits stop the run; surplus backing raises
