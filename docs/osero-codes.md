@@ -5,6 +5,11 @@
 The newer Yuzu looping account using code 3000 is documented in
 [`yuzu-looping-vault.md`](yuzu-looping-vault.md).
 
+**2026-11-06 addendum:** real code **3017** is now confirmed for Osero by the
+Grove Farm deposit documented in [`osero-pendle.md`](osero-pendle.md). The same
+code is the only code allowlisted for the conservative Osero/Pendle Phase-1
+methodology. This does not retroactively change the August census below.
+
 Osero's team lists six codes as active: **3000, 3002, 3006, 3007, 3008, 3009**.
 This note records the on-chain census we ran to check that every one of them is
 actually tracked, what we found, and the fix for the one that was not.

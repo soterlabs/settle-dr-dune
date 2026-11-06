@@ -24,7 +24,7 @@ final recipient.
 | 1003 | cowswap | pseudo_referral | Yes | CowSwap delivery inferred from its settlement contract |
 | 1020 | skybase_oneinch | pseudo_referral | Yes | Skybase activity inferred from a 1inch entrypoint |
 | 3900 | osero_lifi | pseudo_referral | Yes | Osero frontend delivery inferred from Li.Fi integrator events |
-| 1997 | skybase_pendle | holder | Yes | Pendle SY-sUSDS backing attributed to Skybase |
+| 1997 | skybase_pendle | holder | Yes | Residual Pendle SY-sUSDS backing after real-code carve-outs |
 | 1998 | skybase_flagship | holder | Yes | Morpho USDS Flagship position attributed to Skybase |
 | 1999 | skybase_risk_capital | holder | Yes | Morpho USDS Risk Capital position attributed to Skybase |
 | 4001 | keel_solana_bridge | holder | Yes | USDS held by the Solana OFT bridge |

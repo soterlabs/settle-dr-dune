@@ -222,7 +222,14 @@ def build_legs(targets, *, end_date=DEFAULT_END, excluded=frozenset(),
             {"address": [PENDLE.holder], "topics": [[events.TRANSFER_TOPIC0], [], [zero]]},
         ], GENESIS, end_block).rows
         check_pendle_backing(rows, sy, end_ts)
-        frames.append(holder.legs_from_rows(PENDLE, rows, end_ts))
+        pendle_legs = holder.legs_from_rows(PENDLE, rows, end_ts)
+        # Code 1997 is residual integration attribution.  Genuine Osero-tagged
+        # balances that remain inside the reviewed Pendle Phase-1 perimeter are
+        # paid to their explicitly allowlisted real code and deducted 1:1 from
+        # 1997.
+        from . import osero_pendle
+        osero_legs = osero_pendle.build_legs(end_date)
+        frames.append(compose_pendle_attribution(pendle_legs, osero_legs))
     vaults = [t for t in targets if t in (FLAGSHIP, RISK_CAPITAL)]
     if vaults:
         rows, adapters, _ = fetch_morpho(end_ts)
@@ -235,3 +242,19 @@ def build_legs(targets, *, end_date=DEFAULT_END, excluded=frozenset(),
     if not frames:
         return holder.legs_from_rows(targets[0], [], end_ts)
     return pd.concat(frames, ignore_index=True)
+
+
+def compose_pendle_attribution(pendle_legs, osero_legs):
+    """Split whole-SY attribution without changing its aggregate reward base."""
+    from . import osero_pendle
+    if osero_legs.empty:
+        return pendle_legs
+    deductions = osero_pendle.skybase_deductions(osero_legs)
+    residual = pd.concat([pendle_legs, deductions], ignore_index=True).sort_values(
+        ["block", "log_index"], kind="stable")
+    if (residual["amount_change"].cumsum() < -1e-7).any():
+        raise ValueError("Osero Pendle attribution exceeds Skybase SY backing")
+    combined = pd.concat([pendle_legs, osero_legs, deductions], ignore_index=True)
+    if abs(combined.amount_change.sum() - pendle_legs.amount_change.sum()) > 1e-7:
+        raise AssertionError("Pendle beneficiary split changed aggregate backing")
+    return combined
