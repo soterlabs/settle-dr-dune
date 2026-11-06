@@ -55,6 +55,23 @@ def sub_batch(user_addr: str, batches: int) -> int:
     return int.from_bytes(digest[:8], "big") % batches
 
 
+def worker_fingerprint() -> str:
+    """Bind temporary sub-batches to this worker without invalidating the
+    canonical month-end checkpoint when only the batching implementation
+    changes."""
+    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+def validate_cutoff(end: date) -> None:
+    """This worker publishes complete month-end state, so only month
+    boundaries supported by the checkpoint system are valid cutoffs."""
+    if end.day != 1 or end < state_checkpoint.FIRST_CUTOFF:
+        raise SystemExit(
+            "batched worker requires a supported first-of-month --end "
+            f"on or after {state_checkpoint.FIRST_CUTOFF} (got {end})"
+        )
+
+
 def _atomic_json(path: Path, body: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -77,6 +94,10 @@ def _identity(name: str, shard: str, end: date, batches: int) -> dict:
         "end": end.isoformat(),
         "batches": batches,
         "fingerprint": checkpoint_fingerprint(name, shard),
+        # The canonical fingerprint intentionally excludes this optional
+        # low-memory worker. Its temporary files must still be invalidated if
+        # the batching/finalization implementation changes.
+        "worker_fingerprint": worker_fingerprint(),
     }
 
 
@@ -305,6 +326,7 @@ def main() -> int:
         raise SystemExit("--batches must be >= 2")
     if args.end > DEFAULT_END:
         raise SystemExit(beyond_cutoff_message(args.end))
+    validate_cutoff(args.end)
     if args.chunk not in chunk_plan():
         raise SystemExit(f"unknown chunk {args.chunk}")
     _family, _src, _target, plan_n = chunk_plan()[args.chunk]
