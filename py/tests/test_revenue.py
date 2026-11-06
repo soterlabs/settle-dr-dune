@@ -86,9 +86,9 @@ def test_all_reward_sources_are_restricted_to_calendar_2026():
     assert list(out["month"]) == ["2026-01-01", "2026-12-01"]
 
 
-def test_deployed_window_covers_full_september_2026():
-    assert DEFAULT_END == date(2026, 10, 1)
-    assert LAST_SETTLED_DAY == date(2026, 9, 30)
+def test_deployed_window_covers_full_october_2026():
+    assert DEFAULT_END == date(2026, 11, 1)
+    assert LAST_SETTLED_DAY == date(2026, 10, 31)
 
 
 def test_final_combine_rejects_stale_non_2026_checkpoint_rows():

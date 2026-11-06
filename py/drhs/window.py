@@ -24,8 +24,8 @@ from datetime import date, datetime, timedelta, timezone
 REWARD_START = date(2026, 1, 1)
 REWARD_END = date(2027, 1, 1)
 
-# September 2026 close: events on/after October 1 are outside this window.
-DEFAULT_END = date(2026, 10, 1)
+# October 2026 close: events on/after November 1 are outside this window.
+DEFAULT_END = date(2026, 11, 1)
 LAST_SETTLED_DAY = DEFAULT_END - timedelta(days=1)
 
 
