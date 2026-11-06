@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "py"))
 
 from drhs import events  # noqa: E402
 from drhs.hypersync import LogRow  # noqa: E402
-from drhs.sources import custody, osero_pendle as op  # noqa: E402
+from drhs.sources import custody, osero_pendle as op, skybase  # noqa: E402
 
 
 S = sorted(op.STRATEGIES)[0]
@@ -93,6 +93,18 @@ def test_pt_or_yt_sale_consumes_matched_credit_and_inflow_does_not_restore_it():
     assert legs.amount_change.sum() == pytest.approx(60)
 
 
+def test_selling_both_sides_separately_consumes_each_matched_tranche_once():
+    rows = _tagged_wrap() + _split()
+    rows += [_tr(op.PT, S, "0x" + "a" * 40, 44 * 10**18,
+                 tx="0xptsale", idx=1, block=102)]
+    rows += [_tr(op.YT, S, "0x" + "b" * 40, 44 * 10**18,
+                 tx="0xytsale", idx=1, block=103)]
+    legs = op.replay(rows, TX_TS + 100)
+    # The second sale disposes the counterpart to the already-lost tranche;
+    # controlled matched PT/YT remains 66/110, i.e. 60 referred shares.
+    assert legs.amount_change.sum() == pytest.approx(60)
+
+
 def test_morpho_withdrawal_to_strategy_is_custody_but_external_receiver_is_disposal():
     rows = _tagged_wrap() + _split()
     market = next(iter(op.MORPHO_MARKETS))
@@ -142,3 +154,24 @@ def test_skybase_deduction_is_exact_inverse():
     assert set(deductions.user_addr) == {op.SY}
     assert set(deductions.ref_code) == {1997}
     assert pd.concat([legs, deductions]).amount_change.sum() == pytest.approx(0)
+
+
+def test_skybase_split_preserves_total_backing_and_has_nonnegative_residual():
+    osero = op.replay(_tagged_wrap(), TX_TS + 100)
+    base = osero.copy()
+    base["user_addr"] = op.SY
+    base["ref_code"] = 1997
+    combined = skybase.compose_pendle_attribution(base, osero)
+    assert combined.amount_change.sum() == pytest.approx(base.amount_change.sum())
+    residual = combined[(combined.user_addr == op.SY) & (combined.ref_code == 1997)]
+    assert residual.amount_change.sum() == pytest.approx(0)
+
+
+def test_skybase_split_rejects_more_osero_credit_than_sy_backing():
+    osero = op.replay(_tagged_wrap(), TX_TS + 100)
+    base = osero.copy()
+    base["amount_change"] = 99.0
+    base["user_addr"] = op.SY
+    base["ref_code"] = 1997
+    with pytest.raises(ValueError, match="exceeds Skybase SY backing"):
+        skybase.compose_pendle_attribution(base, osero)

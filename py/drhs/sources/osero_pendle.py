@@ -79,25 +79,45 @@ EXECUTION_CONTRACTS = frozenset({
 class State:
     wallet: float = 0.0       # referred sUSDS not yet wrapped (Template A pays it)
     sy: float = 0.0           # tagged SY shares inside the Pendle perimeter
-    pair_units: float = 0.0   # tagged matched PT/YT units (PT only after expiry)
-    pair_shares: float = 0.0  # originating sUSDS-share credit for pair_units
+    pair_units: float = 0.0   # total provenance-bearing PT/YT units minted
+    pt_units: float = 0.0     # provenance-bearing PT still in reviewed custody
+    yt_units: float = 0.0     # provenance-bearing YT still in reviewed custody
+    pair_shares: float = 0.0  # originating sUSDS shares for pair_units
     code: int | None = None
     emitted: float = 0.0
+    after_expiry: bool = False
 
     @property
     def pendle(self) -> float:
         # Share-origin accounting is intentionally conservative about new
         # inflows: only shares moved from a proven Referral mint enter here.
-        return max(0.0, self.sy + self.pair_shares)
+        if self.pair_units <= 0:
+            pair = 0.0
+        else:
+            controlled = self.pt_units if self.after_expiry else min(
+                self.pt_units, self.yt_units)
+            pair = self.pair_shares * controlled / self.pair_units
+        return max(0.0, self.sy + pair)
 
-    def consume_pair(self, units: float, sy_out: float = 0.0) -> float:
-        """Consume matched units referred-first; return tagged units consumed."""
-        if units <= 0 or self.pair_units <= 0:
+    def dispose_pair(self, pt: float = 0.0, yt: float = 0.0) -> None:
+        """Remove each controlled side independently; incoming never restores it."""
+        self.pt_units = max(0.0, self.pt_units - max(0.0, pt))
+        if not self.after_expiry:
+            self.yt_units = max(0.0, self.yt_units - max(0.0, yt))
+
+    def redeem_pair(self, units: float, sy_out: float = 0.0) -> float:
+        """Remove a controlled matched claim and return the units redeemed."""
+        controlled = self.pt_units if self.after_expiry else min(
+            self.pt_units, self.yt_units)
+        if units <= 0 or self.pair_units <= 0 or controlled <= 0:
             return 0.0
-        used = min(self.pair_units, units)
+        used = min(controlled, units)
         shares = self.pair_shares * used / self.pair_units
         self.pair_units -= used
         self.pair_shares -= shares
+        self.pt_units -= used
+        if not self.after_expiry:
+            self.yt_units -= used
         if sy_out > 0:
             # Exact Pendle redemption amount.  Any difference from the
             # originating share credit is rounding/post-expiry disposal.
@@ -186,6 +206,7 @@ def replay(rows, end_ts: int, strategies: frozenset[str] = STRATEGIES) -> pd.Dat
         implicated = _strategies_in_tx(tx_rows)
         for strategy in sorted(implicated & strategies):
             st = states[strategy]
+            st.after_expiry = tx_rows[-1].block_time >= EXPIRY_TS
             # A shared router belongs to the account only when this transaction
             # names one reviewed strategy.  Multi-strategy batches get no
             # router custody credit.
@@ -226,7 +247,10 @@ def replay(rows, end_ts: int, strategies: frozenset[str] = STRATEGIES) -> pd.Dat
                     continue
                 tagged = min(st.sy, sy_in)
                 st.sy -= tagged
-                st.pair_units += py_out * tagged / sy_in if sy_in else 0.0
+                units = py_out * tagged / sy_in if sy_in else 0.0
+                st.pair_units += units
+                st.pt_units += units
+                st.yt_units += units
                 st.pair_shares += tagged
 
             # Matched PT/YT -> SY.
@@ -242,7 +266,7 @@ def replay(rows, end_ts: int, strategies: frozenset[str] = STRATEGIES) -> pd.Dat
                 yt = True if r.block_time >= EXPIRY_TS else _matching_transfer(
                     tx_rows, YT, members, YT, py_in_raw, used)
                 if pt is not None and yt:
-                    st.consume_pair(py_in, sy_out)
+                    st.redeem_pair(py_in, sy_out)
 
             # SY -> sUSDS preserves the tag in the wallet; other redemptions
             # dispose it.  Template A resumes paying any returned wallet shares.
@@ -273,12 +297,12 @@ def replay(rows, end_ts: int, strategies: frozenset[str] = STRATEGIES) -> pd.Dat
                     receiver = _addr(r.topic3)
                     amount = _word(r.data, 1) / 1e18
                     if receiver not in members:
-                        st.consume_pair(amount)
+                        st.dispose_pair(pt=amount)
                 elif r.topic0 == custody.LIQUIDATE_TOPIC0 and _addr(r.topic3) == strategy:
                     caller = _addr(r.topic2)
                     seized = _word(r.data, 2) / 1e18
                     if caller not in members:
-                        st.consume_pair(seized)
+                        st.dispose_pair(pt=seized)
 
             # Every remaining outward movement is a disposal.  Internal account
             # moves are ignored; incoming assets never create credit.
@@ -303,7 +327,7 @@ def replay(rows, end_ts: int, strategies: frozenset[str] = STRATEGIES) -> pd.Dat
                     pt_out += amount
                 else:
                     yt_out += amount
-            st.consume_pair(pt_out if tx_rows[-1].block_time >= EXPIRY_TS else max(pt_out, yt_out))
+            st.dispose_pair(pt=pt_out, yt=yt_out)
 
             # Execution contracts leave the account at tx end.  Any positive
             # balance they retained is conservatively disposed.
@@ -311,7 +335,7 @@ def replay(rows, end_ts: int, strategies: frozenset[str] = STRATEGIES) -> pd.Dat
                 st.wallet = max(0.0, st.wallet - max(0.0, net[SUSDS]))
                 st.sy = max(0.0, st.sy - max(0.0, net[SY]))
                 p, q = max(0.0, net[PT]), max(0.0, net[YT])
-                st.consume_pair(p if tx_rows[-1].block_time >= EXPIRY_TS else max(p, q))
+                st.dispose_pair(pt=p, yt=q)
 
             after = st.pendle
             delta = after - before
